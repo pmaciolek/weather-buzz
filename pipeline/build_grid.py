@@ -330,11 +330,14 @@ def render():
         w = 1 / np.maximum(dist[miss], 1e-6) ** 2
         V[miss] = (w[:, :, None] * vals[idx[miss]]).sum(axis=1) / w.sum(axis=1)[:, None]
 
+    # 13 images per layer: January..December, then the year-round mean of the twelve.
     layers = {k: [] for k in keys}
-    for j in range(V.shape[1]):
-        key = keys[j // 12]
+    for j in range(len(keys) * 13):
+        key, mo = keys[j // 13], j % 13
+        cols = V[:, (j // 13) * 12:(j // 13 + 1) * 12]
+        x = cols.mean(axis=1) if mo == 12 else cols[:, mo]
         # 0..250 grey levels: shares directly; the change is centred on 125 over ±CHANGE_RANGE.
-        v = 125 + V[:, j] / CHANGE_RANGE * 125 if key.startswith("change") else V[:, j] * 250
+        v = 125 + x / CHANGE_RANGE * 125 if key.startswith("change") else x * 250
         img = np.full(LA.shape, 255, dtype=np.uint8)
         # Even levels only: 126 steps is finer than the 7-colour ramp can show, and the PNGs shrink.
         img[land] = np.where(near, np.clip(np.round(np.nan_to_num(v) / 2) * 2, 0, 250), 255).astype(np.uint8)

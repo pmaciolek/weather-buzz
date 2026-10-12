@@ -89,7 +89,7 @@ h3 { margin: 0; font: 650 var(--s-lg)/1.25 var(--f-display); font-stretch: 104%;
 
 /* Controls */
 .controls { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px 14px; }
-.months { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); border: 1px solid var(--rule-strong); border-radius: 6px; overflow: hidden; width: 100%; }
+.months { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)) minmax(0, 1.9fr); border: 1px solid var(--rule-strong); border-radius: 6px; overflow: hidden; width: 100%; }
 .months button, .toggle button { appearance: none; border: 0; background: var(--sheet); color: var(--ink-2); font: 500 var(--s-sm)/1 var(--f-body); padding: 9px 0; cursor: pointer; }
 .months button + button { border-left: 1px solid var(--rule); }
 .months button:hover, .toggle button:hover { color: var(--ink); background: var(--sea); }
@@ -100,7 +100,7 @@ h3 { margin: 0; font: 650 var(--s-lg)/1.25 var(--f-display); font-stretch: 104%;
 .toggle.period button { padding: 9px 14px; }
 .toggle button:disabled { color: var(--ink-3); opacity: .55; cursor: not-allowed; background: var(--sheet); }
 .ctl { display: grid; gap: 4px; min-width: 0; }
-.ctl.mo { flex: 1 1 380px; max-width: 560px; }
+.ctl.mo { flex: 1 1 420px; max-width: 640px; }
 .outlook { margin: 12px 0 0; padding: 10px 14px; border-left: 3px solid var(--accent); background: var(--sheet); color: var(--ink-2); font-size: var(--s-sm); max-width: 110ch; }
 .outlook b { color: var(--ink); font-weight: 600; }
 select { font: 500 var(--s-md)/1.2 var(--f-body); color: var(--ink); background: var(--sheet); border: 1px solid var(--rule-strong); border-radius: 6px; padding: 8px 10px; max-width: 100%; }
@@ -156,7 +156,7 @@ table.matrix { border-collapse: separate; border-spacing: 2px; width: 100%; min-
 .matrix th.place small { color: var(--ink-3); font-weight: 400; margin-left: 5px; font-size: var(--s-xs); }
 .matrix th.cur { color: var(--ink); }
 .matrix td { font: 400 var(--s-sm)/1 var(--f-data); font-variant-numeric: tabular-nums; text-align: center; padding: 8px 2px; border-radius: 2px; cursor: pointer; }
-.matrix td.yr { font-weight: 500; cursor: default; }
+.matrix td.yr { font-weight: 500; }
 .matrix tr.grp th { text-align: left; padding: 16px 4px 4px; color: var(--ink-2); }
 .matrix td.cur { box-shadow: inset 0 0 0 2px var(--ink); }
 
@@ -217,7 +217,7 @@ code { font-family: var(--f-data); font-size: .92em; }
   <section aria-labelledby="atlas-h">
     <div class="sec-head">
       <div>
-        <h2 id="atlas-h">Where to ride in <span id="monthName">October</span></h2>
+        <h2 id="atlas-h">Where to ride <span id="monthName">in October</span></h2>
         <p class="lede" id="atlasLede">Average day score for the month. An ideal day counts 1, a medium day 0.5 and a low day 0.25.</p>
       </div>
     </div>
@@ -335,13 +335,32 @@ code { font-family: var(--f-data); font-size: .92em; }
 <script>
 const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 const MON = MONTHS.map(m => m.slice(0, 3));
+// Month index 12 is the whole year: the mean of the twelve months, appended to every series on load.
+const YEAR = 12;
+const monthLong = m => m === YEAR ? "the whole year" : MONTHS[m];
+// Ride-day changes are counted per month, or per year in the year-round view.
+const per = m => m === YEAR ? { n: 365, u: "a year" } : { n: 30, u: "a month" };
+function addYear() {
+  const avg = xs => { const v = xs.filter(x => x != null); return v.length ? d3.mean(v) : null; };
+  const meanRow = rows => Object.fromEntries(Object.keys(rows[0]).filter(k => typeof rows[0][k] === "number" || rows[0][k] == null).map(k => [k, avg(rows.map(r => r[k]))]));
+  for (const c of CITIES.cities) {
+    for (const k of ["climatology", "climatology_future"]) if (c[k]?.length === 12) c[k].push(meanRow(c[k]));
+    if (c.delta) for (const k of ["t", "rain"]) if (c.delta[k].length === 12) c.delta[k].push(d3.mean(c.delta[k]));
+  }
+  for (const p of GRID?.points ?? []) for (const o of [p, p.f]) if (o)
+    for (const [k, v] of Object.entries(o)) if (Array.isArray(v) && v.length === 12) v.push(avg(v));
+}
 const COUNTRY = { "Kraków":"PL","Gdańsk":"PL","Wrocław":"PL","Warsaw":"PL","Brussels":"BE","Amsterdam":"NL","London":"UK","Berlin":"DE","Graz":"AT","Nice":"FR",
   "Alicante":"ES","Málaga":"ES","Bilbao":"ES","Santa Cruz de Tenerife":"ES","Palermo (Sicily)":"IT","Catania (Sicily)":"IT","Rome":"IT","Split":"HR","Larnaca":"CY",
   "New York":"US","San Francisco":"US","Mountain View":"US","Seattle":"US","Tucson":"US","Austin":"US","Miami":"US",
-  "Bogotá":"CO","São Paulo":"BR","Buenos Aires":"AR","Cape Town":"ZA","Tokyo":"JP","Seoul":"KR","Sydney":"AU","Melbourne":"AU" };
+  "Bogotá":"CO","São Paulo":"BR","Buenos Aires":"AR","Cape Town":"ZA","Tokyo":"JP","Seoul":"KR","Sydney":"AU","Melbourne":"AU",
+  "Kyiv":"UA","Bucharest":"RO","Istanbul":"TR","Beirut":"LB","Marsa Alam":"EG","Dubai":"AE","Toronto":"CA","Waterloo (Wisconsin)":"US","Mexico City":"MX",
+  "Santiago de Chile":"CL","New Delhi":"IN","Bangkok":"TH","Hanoi":"VN","Chengdu":"CN","Beijing":"CN","Shanghai":"CN","Shenzhen":"CN","Taipei":"TW","Sapporo":"JP" };
 const REGION = c => (c.lon > -30 && c.lon < 45 && c.lat > 27) ? (c.lat > 46.5 ? "Northern and central Europe" : "Southern Europe and the Mediterranean")
-  : c.lon <= -30 ? (c.lat > 15 ? "North America" : "South America") : c.lat < 0 ? "Africa and Oceania" : "East Asia";
-const REGION_ORDER = ["Northern and central Europe", "Southern Europe and the Mediterranean", "North America", "South America", "East Asia", "Africa and Oceania"];
+  : c.lon <= -30 ? (c.lat > 15 ? "North America" : "South America") : c.lat < 0 ? "Africa and Oceania"
+  : c.lon < 60 ? "Middle East and North Africa" : (c.lon < 110 && c.lat < 30) ? "South and Southeast Asia" : "East Asia";
+const REGION_ORDER = ["Northern and central Europe", "Southern Europe and the Mediterranean", "Middle East and North Africa", "North America", "South America",
+  "South and Southeast Asia", "East Asia", "Africa and Oceania"];
 
 const root = document.documentElement;
 const tok = n => getComputedStyle(root).getPropertyValue(n).trim();
@@ -364,7 +383,7 @@ const fmt = (v, d = 1) => v == null || Number.isNaN(v) ? "–" : (+v).toFixed(d)
 const pct = v => v == null ? "–" : Math.round(v * 100) + "%";
 const sgn = (v, d = 1) => v == null ? "–" : (Math.abs(v) < 0.5 * 10 ** -d ? "±" : v > 0 ? "+" : "−") + Math.abs(v).toFixed(d);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-const short = n => n.replace(/ \(Sicily\)/, "").replace("Santa Cruz de Tenerife", "Tenerife");
+const short = n => n.replace(/ \((Sicily|Wisconsin)\)/, "").replace(" de Chile", "").replace("Santa Cruz de Tenerife", "Tenerife");
 
 const tip = document.getElementById("tip");
 function showTip(e, html) {
@@ -401,7 +420,7 @@ Promise.all(SNAP ? [SNAP.cities, SNAP.grid, SNAP.world] : [
   fetch("data/grid.json").then(r => r.ok ? r.json() : null).catch(() => null),
   fetch("https://cdn.jsdelivr.net/npm/world-atlas@2.0.2/countries-50m.json").then(r => r.json()).catch(() => null),
 ]).then(([c, g, w]) => {
-  CITIES = c; GRID = g; WORLD = w;
+  CITIES = c; GRID = g; WORLD = w; addYear();
   if (!CITIES.cities.some(x => x.name === state.city)) state.city = CITIES.cities[0].name;
   refreshPalette();
   buildStatic(); buildControls(); renderAll(); bindMapHover(); buildReport();
@@ -427,9 +446,10 @@ function buildStatic() {
 }
 
 function buildControls() {
-  d3.select("#months").selectAll("button").data(MON).join("button").attr("type", "button").text(d => d)
-    .attr("aria-label", (d, i) => MONTHS[i])
-    .on("click", (e, d) => { state.month = MON.indexOf(d); renderAll(); });
+  d3.select("#months").selectAll("button").data([...MON, "All year"]).join("button").attr("type", "button").text(d => d)
+    .attr("class", (d, i) => i === YEAR ? "yr" : null)
+    .attr("aria-label", (d, i) => i === YEAR ? "All year" : MONTHS[i])
+    .on("click", (e, d) => { state.month = [...MON, "All year"].indexOf(d); renderAll(); });
   document.querySelectorAll("#layer button").forEach(b => b.onclick = () => { state.layer = b.dataset.l; renderAll(); });
   document.querySelectorAll("#period button").forEach(b => b.onclick = () => { state.period = b.dataset.p; renderAll(); renderReport(); });
   document.querySelectorAll("#sort button").forEach(b => b.onclick = () => { state.sort = b.dataset.s; syncPressed(); drawMatrix(); });
@@ -444,8 +464,8 @@ function syncPressed() {
 function renderAll() {
   syncPressed();
   const P = CITIES.projection?.years ?? [2026, 2035], B = CITIES.baseline, ideal = state.layer === "ideal_frac";
-  document.getElementById("rankMonth").textContent = MONTHS[state.month] + (chgOn() ? `, change ${P[0]}–${String(P[1]).slice(2)} vs ${B[0]}–${String(B[1]).slice(2)}` : futOn() ? `, ${P[0]}–${P[1]}` : "");
-  document.getElementById("monthName").textContent = MONTHS[state.month] + (chgOn() ? ": what changes over the next 10 years" : futOn() ? " over the next 10 years" : "");
+  document.getElementById("rankMonth").textContent = monthLong(state.month) + (chgOn() ? `, change ${P[0]}–${String(P[1]).slice(2)} vs ${B[0]}–${String(B[1]).slice(2)}` : futOn() ? `, ${P[0]}–${P[1]}` : "");
+  document.getElementById("monthName").textContent = (state.month === YEAR ? "all year round" : "in " + MONTHS[state.month]) + (chgOn() ? ": what changes over the next 10 years" : futOn() ? " over the next 10 years" : "");
   document.getElementById("matrixLede").textContent = chgOn()
     ? `Projected change in ride days, ${P[0]}–${P[1]} minus ${B[0]}–${B[1]}: per month in the month columns, per year in the last. Green gets better for riding, brown gets worse. Hover a cell for both scores.`
     : futOn()
@@ -453,9 +473,9 @@ function renderAll() {
     : "Average day score for each place, from 10 years of hourly data. Hover a cell to see what limits it; select one to map that month.";
   document.getElementById("matrixPeriod").textContent = chgOn() ? `Change, ${P[0]}–${String(P[1]).slice(2)} minus ${B[0]}–${String(B[1]).slice(2)}` : futOn() ? `Projected, ${P[0]}–${P[1]}` : `Observed, ${B[0]}–${B[1]}`;
   document.getElementById("atlasLede").textContent = chgOn()
-    ? `Projected change in ${ideal ? "the share of ideal days" : "the average day score"}, ${P[0]}–${P[1]} minus ${B[0]}–${B[1]}. The scale is in ${ideal ? "ideal" : "ride"} days a month and runs to ±${fmt(CHG() * 30, 1)}.`
+    ? `Projected change in ${ideal ? "the share of ideal days" : "the average day score"}, ${P[0]}–${P[1]} minus ${B[0]}–${B[1]}. The scale is in ${ideal ? "ideal" : "ride"} days ${per(state.month).u} and runs to ±${fmt(CHG() * per(state.month).n, state.month === YEAR ? 0 : 1)}.`
     : ideal ? "Share of days that are ideal for riding: at least 6 hours at 18–30 °C, dry, calm and not too humid."
-    : "Average day score for the month. An ideal day counts 1, a medium day 0.5 and a low day 0.25.";
+    : `Average day score for the ${state.month === YEAR ? "year, the mean of the twelve months" : "month"}. An ideal day counts 1, a medium day 0.5 and a low day 0.25.`;
   drawOutlook(); drawLegend(); drawMap(); drawRanking(); drawMatrix();
 }
 function drawOutlook() {
@@ -466,16 +486,16 @@ function drawOutlook() {
   const ch = CITIES.cities.map(c => dOf(c, m));
   const up = ch.filter(v => v > 0.005).length, down = ch.filter(v => v < -0.005).length;
   el.innerHTML = `<b>Projected for ${P.years[0]}–${P.years[1]}.</b> Each hour of ${CITIES.baseline[0]}–${CITIES.baseline[1]} is shifted by the change the CMIP6 models project between the two decades under ${P.scenario}, a middle-of-the-road emissions path (mean of ${P.models.length} models). ` +
-    `In ${MONTHS[m]} the places warm by ${sgn(d3.min(dts))} to ${sgn(d3.max(dts))} °C; ${up} of ${ch.length} get better for riding and ${down} get worse. ` +
+    `${m === YEAR ? "Over the year" : "In " + MONTHS[m]} the places warm by ${sgn(d3.min(dts))} to ${sgn(d3.max(dts))} °C; ${up} of ${ch.length} get better for riding and ${down} get worse. ` +
     `Dew point, and so the humidex, rises with temperature at the same relative humidity, rain scales with the projected monthly change, and wind and air quality stay as observed. This is a shift in the average climate, not a forecast for any one year.`;
 }
 function drawLegend() {
   const chg = chgOn();
   d3.select("#ramp").selectAll("i").data(d3.range(7)).join("i").style("background", i => `var(--${chg ? "c" : "r"}${i})`);
   const r = CHG();
-  document.getElementById("ticks").innerHTML = (chg ? [-r, -r / 2, 0, r / 2, r].map(v => sgn(v * 30, v && Math.abs(v * 30) < 1 ? 2 : 1)) : ["0", "0.25", "0.5", "0.75", "1"]).map(t => `<span>${t}</span>`).join("");
+  document.getElementById("ticks").innerHTML = (chg ? [-r, -r / 2, 0, r / 2, r].map(v => { const d = v * per(state.month).n; return d === 0 ? "0" : sgn(d, d && Math.abs(d) < 1 ? 2 : Math.abs(d) >= 5 ? 0 : 1); }) : ["0", "0.25", "0.5", "0.75", "1"]).map(t => `<span>${t}</span>`).join("");
   const unit = state.layer === "ideal_frac" ? "ideal" : "ride";
-  document.getElementById("cap").innerHTML = chg ? `<span>Fewer ${unit} days a month</span><span>More ${unit} days a month</span>` : "<span>Rarely rideable</span><span>Ideal nearly every day</span>";
+  document.getElementById("cap").innerHTML = chg ? `<span>Fewer ${unit} days ${per(state.month).u}</span><span>More ${unit} days ${per(state.month).u}</span>` : "<span>Rarely rideable</span><span>Ideal nearly every day</span>";
 }
 
 /* ---------------- map ---------------- */
@@ -545,7 +565,7 @@ function drawMap() {
       (n < total * 0.98 ? `<b>${Math.round(n / total * 100)}% of the grid has loaded so far</b>; grey land has no data yet. ` : "") +
       (GRID.n_dew != null && GRID.n_dew < n * 0.98 ? `<b>The humidex limit is applied at ${GRID.n_dew.toLocaleString("en")} of ${n.toLocaleString("en")} map points so far</b> (dew point still downloading), so hot, humid regions look better than they are; the places are complete. ` : "") +
       `Values between samples are interpolated, so use the table for specific places.`;
-    if (GRID.layers[layerKey()]) colouredLayer(layerKey(), state.month).then(paintMap);
+    if (GRID.layers[layerKey()]?.[state.month]) colouredLayer(layerKey(), state.month).then(paintMap);
   } else note.innerHTML = `<span class="warn">The global grid hasn't been built yet. Run <code>build_grid.py fetch-wx</code>, then <code>render</code>.</span>`;
   paintMap();
 }
@@ -639,7 +659,7 @@ function bindMapHover() {
 // x: the month's summary for the shown period; base: the observed one, when x is projected.
 function tipRows(m, x, base) {
   const vs = (a, b, d, u = "") => base ? ` <span class="k">(${sgn(a - b, d)}${u})</span>` : "";
-  return `<div class="row" style="margin-top:6px"><span>${base ? `${MON[m]} score, 2026–35` : `${MONTHS[m]} day score`}</span><b class="num">${fmt(x.s, 2)}${vs(x.s, base?.s, 2)}</b></div>
+  return `<div class="row" style="margin-top:6px"><span>${base ? `${m === YEAR ? "Year" : MON[m]} score, 2026–35` : `${m === YEAR ? "Year-round" : MONTHS[m]} day score`}</span><b class="num">${fmt(x.s, 2)}${vs(x.s, base?.s, 2)}</b></div>
     <div class="row"><span class="k">Ideal / medium / low days</span><span class="num">${pct(x.i)} / ${pct(x.md)} / ${pct(x.lo)}</span></div>
     <div class="row"><span class="k">Average daily high</span><span class="num">${fmt(x.t)} °C${vs(x.t, base?.t, 1)}</span></div>
     ${x.hx != null ? `<div class="row"><span class="k">Average daily peak humidex</span><span class="num">${fmt(x.hx)}${vs(x.hx, base?.hx, 1)}</span></div>` : ""}
@@ -649,7 +669,7 @@ function tipRows(m, x, base) {
 function cityTip(c, m) {
   const x = climOf(c)[m], fut = futOn() && c.climatology_future;
   return `<b>${esc(c.name)}</b> <span class="k">${COUNTRY[c.name] ?? ""}</span>${tipRows(m, fromClim(x), fut ? fromClim(c.climatology[m]) : null)}
-    <div class="row"><span class="k">Ride days in 30</span><span class="num">${fmt(x.score * 30, 1)}</span></div>
+    <div class="row"><span class="k">${m === YEAR ? "Ride days a year" : "Ride days in 30"}</span><span class="num">${m === YEAR ? fmt(x.score * 365, 0) : fmt(x.score * 30, 1)}</span></div>
     ${fut && c.delta ? `<div class="row"><span class="k">Projected warming, rain</span><span class="num">${sgn(c.delta.t[m])} °C, ${sgn((c.delta.rain[m] - 1) * 100, 0)}%</span></div>` : ""}`;
 }
 
@@ -667,7 +687,7 @@ function drawRanking() {
         return `<span class="pos">${String(i + 1).padStart(2, "0")}</span>
         <span class="nm">${esc(d.name)}<small>${COUNTRY[d.name] ?? ""}</small></span>
         <span class="was">${fmt(d.climatology[m].score, 2)} → ${fmt(x.score, 2)}</span>
-        <span class="sc" title="Ride days a month">${sgn(dv * 30, 1)}</span>
+        <span class="sc" title="Ride days ${per(m).u}">${sgn(dv * per(m).n, m === YEAR ? 0 : 1)}</span>
         <span class="bar div" aria-hidden="true"><i style="${dv >= 0 ? "left:50%" : `left:${50 - w}%`};width:${w}%;background:${colC(dv)}"></i></span>`; }
       return `<span class="pos">${String(i + 1).padStart(2, "0")}</span>
         <span class="nm">${esc(d.name)}<small>${COUNTRY[d.name] ?? ""}</small></span>
@@ -679,14 +699,14 @@ function drawRanking() {
           <i style="width:${x.low_frac * 100}%;background:${col(.25)}"></i></span>`; })
     .order();
   document.getElementById("rankKey").innerHTML = chg
-    ? `<span><i class="swatch" style="background:${colC(CHG())}"></i>Better for riding</span><span><i class="swatch" style="background:${colC(-CHG())}"></i>Worse</span><span>Score ${CITIES.baseline[0]}–${String(CITIES.baseline[1]).slice(2)} → ${CITIES.projection?.years.join("–")}, then the change in ride days a month</span>`
+    ? `<span><i class="swatch" style="background:${colC(CHG())}"></i>Better for riding</span><span><i class="swatch" style="background:${colC(-CHG())}"></i>Worse</span><span>Score ${CITIES.baseline[0]}–${String(CITIES.baseline[1]).slice(2)} → ${CITIES.projection?.years.join("–")}, then the change in ride days ${per(m).u}</span>`
     : TIERS.slice(0, 3).map(([v, l]) => `<span><i class="swatch" style="background:${col(v)}"></i>${l}</span>`).join("") + `<span>Bars show the share of days</span>` + (futOn() ? `<span>Small figures: change from 2016–2025</span>` : "");
 }
 
 /* ---------------- matrix ---------------- */
 function drawMatrix() {
   const m = state.month, t = d3.select("#matrix"); t.selectAll("*").remove();
-  const chg = chgOn(), annual = c => d3.mean(climOf(c), x => x.score), annual0 = c => d3.mean(c.climatology, x => x.score);
+  const chg = chgOn(), annual = c => climOf(c)[YEAR].score, annual0 = c => c.climatology[YEAR].score;
   // Value shown in a cell: the score, or in the change view the difference next − last.
   const val = chg ? (c, i) => dOf(c, i) : (c, i) => climOf(c)[i].score, yv = chg ? c => annual(c) - annual0(c) : annual;
   const bg = chg ? colC : col, ink = chg ? inkOnC : inkOn;
@@ -695,7 +715,7 @@ function drawMatrix() {
   const hr = t.append("thead").append("tr");
   hr.append("th").attr("class", "place").attr("scope", "col").text("");
   MON.forEach((n, i) => hr.append("th").attr("scope", "col").attr("class", i === m ? "cur" : null).text(n));
-  hr.append("th").attr("scope", "col").text(chg ? "Year, days" : "Year");
+  hr.append("th").attr("scope", "col").attr("class", m === YEAR ? "cur" : null).text(chg ? "Year, days" : "Year");
   const body = t.append("tbody");
   const groups = state.sort === "region"
     ? REGION_ORDER.map(r => [r, CITIES.cities.filter(c => REGION(c) === r)]).filter(g => g[1].length)
@@ -705,12 +725,12 @@ function drawMatrix() {
     for (const c of cities) {
       const tr = body.append("tr");
       tr.append("th").attr("class", "place").attr("scope", "row").html(`${esc(c.name)}<small>${COUNTRY[c.name] ?? ""}</small>`);
-      climOf(c).forEach((x, i) => tr.append("td").attr("class", i === m ? "cur" : null)
+      climOf(c).slice(0, 12).forEach((x, i) => tr.append("td").attr("class", i === m ? "cur" : null)
         .style("background", bg(val(c, i))).style("color", ink(val(c, i))).text(txt(val(c, i)))
         .on("mousemove", e => showTip(e, cityTip(c, i))).on("mouseleave", hideTip)
         .on("click", () => { state.month = i; renderAll(); }));
       const a = annual(c), a0 = annual0(c);
-      tr.append("td").attr("class", "yr").style("background", bg(yv(c))).style("color", ink(yv(c))).text(ytxt(yv(c)))
+      tr.append("td").attr("class", m === YEAR ? "yr cur" : "yr").on("click", () => { state.month = YEAR; renderAll(); }).style("background", bg(yv(c))).style("color", ink(yv(c))).text(ytxt(yv(c)))
         .on("mousemove", e => showTip(e, `<b>${esc(c.name)}</b><div class="row" style="margin-top:6px"><span class="k">Average day score, all year${futOn() ? ", 2026–35" : ""}</span><b class="num">${fmt(a, 2)}${futOn() ? ` <span class="k">(${sgn(a - a0, 3)})</span>` : ""}</b></div><div class="row"><span class="k">Ride days a year</span><span class="num">${Math.round(a * 365)}${futOn() ? ` <span class="k">(${sgn((a - a0) * 365, 0)})</span>` : ""}</span></div>`))
         .on("mouseleave", hideTip);
     }

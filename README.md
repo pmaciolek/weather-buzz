@@ -83,6 +83,8 @@ cd ../web && python3.13 -m http.server 8765   # open http://localhost:8765
 
 Requires `numpy scipy pillow global-land-mask cdsapi netCDF4` (`pip install --user ...`).
 
+**All year:** the month selector's "All year" option shows the mean of the twelve monthly values (map, ranking, table and change view; changes are then in ride days a year).
+
 **Map rendering:** samples are interpolated linearly over a Delaunay mesh onto a 1/6° raster
 (about 19 km), stored as greyscale PNGs inside `grid.json`, coloured in the browser and clipped
 to the Natural Earth 1:50m coastline. The map zooms (Ctrl/Cmd + scroll, pinch, or the buttons).
