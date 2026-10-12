@@ -1,0 +1,12 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# Downloaded raw data and intermediate results (several GB); rebuilt by the pipeline
+cache/
+
+# Claude Code session runtime files
+.claude/scheduled_tasks.lock
+
+# Self-contained offline snapshots (~20 MB each); built by pipeline/snapshot.py
+web/snapshots/

@@ -1,0 +1,899 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Cycling Weather Atlas</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..800&family=IBM+Plex+Mono:wght@400;500&family=Public+Sans:ital,wght@0,400;0,500;0,600;1,400&display=swap">
+<script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/topojson-client@3.1.0/dist/topojson-client.min.js"></script>
+<style>
+/* Layout: an atlas sheet. Masthead with data stamp, then the map beside a ranked list,
+   then the month-by-month matrix, the month report for one place, and the sources. */
+:root {
+  color-scheme: light;
+  --paper: #f7f8f5;          /* page ground, faint green-grey bias */
+  --sheet: #ffffff;          /* raised surfaces: map frame, tables */
+  --ink: #15201d;
+  --ink-2: #4a5753;
+  --ink-3: #7b8783;
+  --rule: #dfe4e0;
+  --rule-strong: #c4ccc8;
+  --sea: #eef2f1;
+  --land-empty: #e3e7e3;
+  --border-line: rgba(21, 32, 29, .32);
+  --accent: #276a6c;         /* spruce: controls, focus, selection */
+  --on-accent: #ffffff;
+  --better: #2f8a7a;
+  --worse: #b4613f;
+  --neutral: #c9cfcb;
+  /* Ride-score ramp, straw → sage → teal → spruce; lightness falls monotonically. */
+  --r0: #efe8cf; --r1: #dcdc9c; --r2: #aecb85; --r3: #6fae7e; --r4: #3b8c78; --r5: #276a6c; --r6: #21485a;
+  /* Projected change: clay (worse) → stone (no change) → teal (better). */
+  --c0: #8f4a2c; --c1: #c98a68; --c2: #ebd6c6; --c3: #eceeea; --c4: #c2ddd4; --c5: #6fb3a2; --c6: #1f6b5f;
+
+  --f-display: "Archivo", "Helvetica Neue", Arial, sans-serif;
+  --f-body: "Public Sans", "Segoe UI", system-ui, sans-serif;
+  --f-data: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  --s-xs: 11px; --s-sm: 12.5px; --s-md: 14.5px; --s-lg: 18px; --s-xl: 24px; --s-2xl: clamp(30px, 4.2vw, 46px);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --paper: #0f1413; --sheet: #161d1b; --ink: #e5ebe8; --ink-2: #aab6b1; --ink-3: #7c8984;
+    --rule: #26302d; --rule-strong: #34403c; --sea: #121918; --land-empty: #222a28;
+    --border-line: rgba(229, 235, 232, .3); --accent: #6cc4ad; --on-accent: #0b1210;
+    --better: #6cc4ad; --worse: #d98a66; --neutral: #3c4743;
+    --r0: #2a3130; --r1: #3d4a3a; --r2: #5a6e3f; --r3: #7f9a4e; --r4: #78b88a; --r5: #86c9b6; --r6: #bfe6da;
+    --c0: #e3a07e; --c1: #a96a4c; --c2: #5a4237; --c3: #2c3331; --c4: #2f5048; --c5: #4f9584; --c6: #8fd6c2;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --paper: #0f1413; --sheet: #161d1b; --ink: #e5ebe8; --ink-2: #aab6b1; --ink-3: #7c8984;
+  --rule: #26302d; --rule-strong: #34403c; --sea: #121918; --land-empty: #222a28;
+  --border-line: rgba(229, 235, 232, .3); --accent: #6cc4ad; --on-accent: #0b1210;
+  --better: #6cc4ad; --worse: #d98a66; --neutral: #3c4743;
+  --r0: #2a3130; --r1: #3d4a3a; --r2: #5a6e3f; --r3: #7f9a4e; --r4: #78b88a; --r5: #86c9b6; --r6: #bfe6da;
+  --c0: #e3a07e; --c1: #a96a4c; --c2: #5a4237; --c3: #2c3331; --c4: #2f5048; --c5: #4f9584; --c6: #8fd6c2;
+}
+
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body { margin: 0; background: var(--paper); color: var(--ink); font: 400 var(--s-md)/1.55 var(--f-body); }
+.wrap { max-width: 1600px; margin: 0 auto; padding-inline: 16px; padding-block: 0 72px; }
+@media (min-width: 720px) { .wrap { padding-inline: 28px; } }
+a { color: var(--accent); text-underline-offset: 2px; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.num { font-family: var(--f-data); font-variant-numeric: tabular-nums; }
+.eyebrow { font: 600 var(--s-xs)/1.2 var(--f-body); letter-spacing: .09em; text-transform: uppercase; color: var(--ink-3); }
+
+/* Masthead */
+.mast { display: grid; gap: 18px; padding-block: 34px 26px; border-bottom: 1px solid var(--rule-strong); }
+@media (min-width: 900px) { .mast { grid-template-columns: 1fr auto; align-items: end; } }
+.mast h1 { margin: 0; font: 760 var(--s-2xl)/1 var(--f-display); font-stretch: 118%; letter-spacing: -.01em; text-wrap: balance; }
+.mast p { margin: 12px 0 0; max-width: 62ch; color: var(--ink-2); }
+.stamp { display: grid; grid-template-columns: auto auto; gap: 4px 16px; margin: 0; font: 400 var(--s-sm)/1.4 var(--f-data); color: var(--ink-2); }
+.stamp dt { color: var(--ink-3); }
+.stamp dd { margin: 0; }
+
+section { padding-block: 34px 0; }
+.sec-head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 10px 24px; margin-bottom: 14px; }
+.sec-head > div:first-child { min-width: 0; }
+h2 { margin: 0; font: 700 var(--s-xl)/1.15 var(--f-display); font-stretch: 108%; text-wrap: balance; }
+h3 { margin: 0; font: 650 var(--s-lg)/1.25 var(--f-display); font-stretch: 104%; }
+.lede { margin: 6px 0 0; color: var(--ink-2); max-width: 70ch; }
+.note { color: var(--ink-3); font-size: var(--s-sm); max-width: 90ch; }
+
+/* Controls */
+.controls { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px 14px; }
+.months { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); border: 1px solid var(--rule-strong); border-radius: 6px; overflow: hidden; width: 100%; }
+.months button, .toggle button { appearance: none; border: 0; background: var(--sheet); color: var(--ink-2); font: 500 var(--s-sm)/1 var(--f-body); padding: 9px 0; cursor: pointer; }
+.months button + button { border-left: 1px solid var(--rule); }
+.months button:hover, .toggle button:hover { color: var(--ink); background: var(--sea); }
+.months button[aria-pressed="true"], .toggle button[aria-pressed="true"] { background: var(--accent); color: var(--on-accent); }
+.toggle { display: inline-flex; flex-wrap: wrap; border: 1px solid var(--rule-strong); border-radius: 6px; overflow: hidden; }
+.toggle button { padding: 9px 12px; }
+.toggle button + button { border-left: 1px solid var(--rule); }
+.toggle.period button { padding: 9px 14px; }
+.toggle button:disabled { color: var(--ink-3); opacity: .55; cursor: not-allowed; background: var(--sheet); }
+.ctl { display: grid; gap: 4px; min-width: 0; }
+.ctl.mo { flex: 1 1 380px; max-width: 560px; }
+.outlook { margin: 12px 0 0; padding: 10px 14px; border-left: 3px solid var(--accent); background: var(--sheet); color: var(--ink-2); font-size: var(--s-sm); max-width: 110ch; }
+.outlook b { color: var(--ink); font-weight: 600; }
+select { font: 500 var(--s-md)/1.2 var(--f-body); color: var(--ink); background: var(--sheet); border: 1px solid var(--rule-strong); border-radius: 6px; padding: 8px 10px; max-width: 100%; }
+label.field { display: grid; gap: 4px; }
+
+/* Atlas */
+.atlas { display: grid; gap: 22px; margin-top: 16px; }
+.mapframe { position: relative; background: var(--sea); border: 1px solid var(--rule); border-radius: 4px; overflow: hidden; touch-action: pan-y; }
+.mapframe.zoomed { touch-action: none; cursor: grab; }
+.mapframe.zoomed:active { cursor: grabbing; }
+#map { display: block; width: 100%; }
+.zoom { position: absolute; right: 10px; top: 10px; display: grid; border: 1px solid var(--rule-strong); border-radius: 6px; overflow: hidden; background: var(--sheet); }
+.zoom button { appearance: none; border: 0; background: var(--sheet); color: var(--ink); font: 500 16px/1 var(--f-data); width: 32px; height: 32px; cursor: pointer; }
+.zoom button + button { border-top: 1px solid var(--rule); }
+.zoom button:hover { background: var(--sea); }
+.zoom button.txt { font: 600 10px/1 var(--f-body); letter-spacing: .06em; text-transform: uppercase; }
+.zoomhint { position: absolute; left: 10px; bottom: 8px; font-size: var(--s-xs); color: var(--ink-2); background: color-mix(in srgb, var(--sheet) 82%, transparent); padding: 3px 7px; border-radius: 3px; pointer-events: none; }
+#mapsvg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
+#mapsvg text { font: 500 11px var(--f-body); fill: var(--ink); paint-order: stroke; stroke: var(--paper); stroke-width: 3px; stroke-linejoin: round; }
+.mapfoot { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 10px 24px; margin-top: 10px; align-items: flex-start; }
+.legend { display: grid; gap: 4px; width: min(100%, 300px); }
+.legend .ramp { display: grid; grid-template-columns: repeat(7, 1fr); height: 10px; border-radius: 2px; overflow: hidden; }
+.legend .ticks { display: flex; justify-content: space-between; font: 400 var(--s-xs)/1 var(--f-data); color: var(--ink-3); }
+.legend .cap { font-size: var(--s-xs); color: var(--ink-3); display: flex; justify-content: space-between; gap: 10px; }
+.swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; vertical-align: -1px; margin-right: 5px; flex: none; }
+
+/* Ranking panel */
+.rank { background: var(--sheet); border: 1px solid var(--rule); border-radius: 4px; padding: 16px 16px 12px; min-width: 0; }
+/* Ranked list flows down columns so it reads like a league table. */
+.rank ol { list-style: none; margin: 10px 0 0; padding: 0; columns: 4 250px; column-gap: 28px; }
+.rank li { break-inside: avoid; display: grid; grid-template-columns: 22px minmax(0, 1fr) auto 42px; gap: 5px 8px; align-items: center; padding: 7px 4px; border-top: 1px solid var(--rule); cursor: pointer; border-radius: 3px; }
+.rank li:hover, .rank li.sel { background: var(--sea); }
+.rank .pos { font: 400 var(--s-xs)/1 var(--f-data); color: var(--ink-3); }
+.rank .nm { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rank .nm small { color: var(--ink-3); font-weight: 400; margin-left: 5px; font-size: var(--s-xs); }
+.rank .sc { font: 500 var(--s-md)/1 var(--f-data); text-align: right; }
+.rank .dl { font: 400 var(--s-xs)/1 var(--f-data); text-align: right; }
+.rank .bar { grid-column: 2 / 5; display: flex; height: 6px; gap: 1px; background: var(--rule); border-radius: 1px; overflow: hidden; }
+.rank .bar i { display: block; height: 100%; }
+/* Change view: bars grow left (worse) or right (better) from a centre line. */
+.rank .bar.div { position: relative; display: block; background: var(--rule); }
+.rank .bar.div::after { content: ""; position: absolute; left: calc(50% - 1px); top: -2px; bottom: -2px; width: 2px; background: var(--ink-3); }
+.rank .bar.div i { position: absolute; top: 0; }
+.rank .was { font: 400 var(--s-xs)/1 var(--f-data); color: var(--ink-3); text-align: right; white-space: nowrap; }
+.mperiod { margin: 0 0 6px; color: var(--ink-2); }
+.key { display: flex; gap: 6px 14px; flex-wrap: wrap; font-size: var(--s-xs); color: var(--ink-3); margin-top: 10px; }
+
+/* Matrix */
+.scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+table.matrix { border-collapse: separate; border-spacing: 2px; width: 100%; min-width: 780px; }
+.matrix th { font: 500 var(--s-xs)/1.2 var(--f-body); letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); padding: 6px 4px; text-align: center; }
+.matrix th.place { text-transform: none; letter-spacing: 0; font: 500 var(--s-sm)/1.2 var(--f-body); color: var(--ink); text-align: left; white-space: nowrap; padding-right: 10px; position: sticky; left: 0; background: var(--paper); z-index: 1; }
+.matrix th.place small { color: var(--ink-3); font-weight: 400; margin-left: 5px; font-size: var(--s-xs); }
+.matrix th.cur { color: var(--ink); }
+.matrix td { font: 400 var(--s-sm)/1 var(--f-data); font-variant-numeric: tabular-nums; text-align: center; padding: 8px 2px; border-radius: 2px; cursor: pointer; }
+.matrix td.yr { font-weight: 500; cursor: default; }
+.matrix tr.grp th { text-align: left; padding: 16px 4px 4px; color: var(--ink-2); }
+.matrix td.cur { box-shadow: inset 0 0 0 2px var(--ink); }
+
+/* Report */
+.report { display: grid; gap: 28px; }
+@media (min-width: 1040px) { .report { grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); } }
+.report > div { min-width: 0; }
+.headline { font: 600 clamp(19px, 2.2vw, 24px)/1.3 var(--f-display); font-stretch: 102%; margin: 4px 0 8px; max-width: 42ch; text-wrap: balance; }
+.metrics { width: 100%; border-collapse: collapse; margin-top: 12px; }
+.metrics th, .metrics td { padding: 9px 6px; border-top: 1px solid var(--rule); text-align: left; vertical-align: middle; }
+.metrics thead th { border-top: 0; font: 500 var(--s-xs)/1.2 var(--f-body); letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); }
+.metrics td.v { font: 500 var(--s-md)/1 var(--f-data); white-space: nowrap; }
+.metrics td.t { font: 400 var(--s-sm)/1.3 var(--f-data); color: var(--ink-2); white-space: nowrap; }
+.metrics td.strip { width: 40%; min-width: 140px; }
+.metrics .lbl { font-weight: 500; }
+.metrics .lbl small { display: block; color: var(--ink-3); font-weight: 400; font-size: var(--s-xs); }
+.strip svg { display: block; width: 100%; height: 26px; overflow: hidden; }
+.chart svg { display: block; width: 100%; overflow: visible; }
+.chart text { font: 400 11px var(--f-data); fill: var(--ink-3); }
+.cal { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 3px; margin-top: 10px; max-width: 520px; }
+.cal .wd { font: 500 var(--s-xs)/1 var(--f-body); color: var(--ink-3); text-align: center; padding-bottom: 4px; letter-spacing: .05em; }
+.cal .d { aspect-ratio: 1.3; border-radius: 3px; padding: 4px 5px; font: 500 var(--s-xs)/1 var(--f-data); display: flex; flex-direction: column; justify-content: space-between; cursor: default; }
+.cal .d .why { font: 600 10px/1 var(--f-data); align-self: flex-end; opacity: .9; }
+.cal .d.pre { outline: 1.5px dashed var(--ink-2); outline-offset: -2px; }
+.cal .mlabel { grid-column: 1 / -1; font: 600 var(--s-xs)/1 var(--f-body); letter-spacing: .08em; text-transform: uppercase; color: var(--ink-2); padding: 10px 0 2px; }
+
+/* Method + sources */
+.cols { display: grid; gap: 32px; border-top: 1px solid var(--rule-strong); padding-top: 30px; }
+@media (min-width: 900px) { .cols { grid-template-columns: 1fr 1fr; } }
+.cols > div { min-width: 0; }
+.rules { margin: 12px 0 0; padding: 0; list-style: none; }
+.rules li { display: grid; grid-template-columns: 118px minmax(0, 1fr); gap: 12px; padding: 9px 0; border-top: 1px solid var(--rule); font-size: var(--s-sm); }
+.rules .tag { display: flex; align-items: baseline; font-weight: 600; }
+.credits { margin: 12px 0 0; padding: 0; list-style: none; font-size: var(--s-sm); color: var(--ink-2); }
+.credits li { padding: 9px 0; border-top: 1px solid var(--rule); }
+.credits b { color: var(--ink); font-weight: 600; }
+.legal { margin-top: 12px; font: 400 var(--s-xs)/1.55 var(--f-data); color: var(--ink-3); }
+
+.tip { position: fixed; z-index: 20; pointer-events: none; width: max-content; max-width: 300px; background: var(--sheet); color: var(--ink); border: 1px solid var(--rule-strong); border-radius: 4px; padding: 9px 11px; font-size: var(--s-sm); line-height: 1.5; box-shadow: 0 6px 24px rgba(0,0,0,.14); }
+.tip b { font-weight: 600; }
+.tip .k { color: var(--ink-3); }
+.tip .row { display: flex; justify-content: space-between; gap: 16px; }
+.warn { font-size: var(--s-sm); color: var(--ink-2); }
+code { font-family: var(--f-data); font-size: .92em; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; scroll-behavior: auto !important; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="mast">
+    <div>
+      <h1>Cycling Weather Atlas</h1>
+      <p>How often the weather is good for a ride, by place and month. Each day is scored on its riding hours: temperature, humidex, rain and wind. Days with poor air quality are ruled out. Switch to the next 10 years to see the same climate shifted by the projected warming.</p>
+    </div>
+    <dl class="stamp" id="stamp"></dl>
+  </header>
+
+  <section aria-labelledby="atlas-h">
+    <div class="sec-head">
+      <div>
+        <h2 id="atlas-h">Where to ride in <span id="monthName">October</span></h2>
+        <p class="lede" id="atlasLede">Average day score for the month. An ideal day counts 1, a medium day 0.5 and a low day 0.25.</p>
+      </div>
+    </div>
+    <div class="controls">
+      <div class="ctl"><span class="eyebrow">Period</span>
+        <div class="toggle period" id="period" role="group" aria-label="Period">
+          <button type="button" data-p="now" aria-pressed="true">Last 10 years <span class="num">2016–25</span></button>
+          <button type="button" data-p="fut" aria-pressed="false">Next 10 years <span class="num">2026–35</span></button>
+          <button type="button" data-p="chg" aria-pressed="false" title="Projected 2026–2035 minus observed 2016–2025">Change <span class="num">next − last</span></button>
+        </div></div>
+      <div class="ctl mo"><span class="eyebrow">Month</span><div class="months" id="months" role="group" aria-label="Month"></div></div>
+      <div class="ctl"><span class="eyebrow">Map shows</span>
+        <div class="toggle" id="layer" role="group" aria-label="Map layer">
+          <button type="button" data-l="score" aria-pressed="true">Day score</button>
+          <button type="button" data-l="ideal_frac" aria-pressed="false">Ideal days only</button>
+        </div></div>
+    </div>
+    <p class="outlook" id="outlook" hidden></p>
+    <div class="atlas">
+      <div style="min-width:0">
+        <div class="mapframe" id="mapframe"><canvas id="map" role="img" aria-label="World map of cycling weather score"></canvas><svg id="mapsvg" aria-hidden="true"></svg>
+          <div class="zoom" role="group" aria-label="Map zoom"><button type="button" id="zin" aria-label="Zoom in">+</button><button type="button" id="zout" aria-label="Zoom out">−</button><button type="button" id="zreset" class="txt" aria-label="Show whole world">All</button></div>
+          <div class="zoomhint" id="zoomhint">Ctrl + scroll or pinch to zoom · drag to pan</div></div>
+        <div class="mapfoot">
+          <div class="legend" aria-label="Legend">
+            <div class="ramp" id="ramp"></div>
+            <div class="ticks" id="ticks"></div>
+            <div class="cap" id="cap"></div>
+          </div>
+          <p class="note" id="gridNote" style="margin:0;max-width:60ch"></p>
+        </div>
+      </div>
+      <aside class="rank" aria-labelledby="rank-h">
+        <div class="eyebrow" id="rank-h">Ranked for <span id="rankMonth"></span></div>
+        <ol id="rankList"></ol>
+        <div class="key" id="rankKey"></div>
+      </aside>
+    </div>
+  </section>
+
+  <section aria-labelledby="matrix-h">
+    <div class="sec-head">
+      <div>
+        <h2 id="matrix-h">Month by month</h2>
+        <p class="lede" id="matrixLede">Average day score for each place, from 10 years of hourly data. Hover a cell to see what limits it; select one to map that month.</p>
+      </div>
+      <div class="toggle" id="sort" role="group" aria-label="Sort places">
+        <button type="button" data-s="region" aria-pressed="true">By region</button>
+        <button type="button" data-s="month" aria-pressed="false">Best in month</button>
+        <button type="button" data-s="year" aria-pressed="false">Best year-round</button>
+      </div>
+    </div>
+    <div class="eyebrow mperiod" id="matrixPeriod"></div>
+    <div class="scroll"><table class="matrix" id="matrix"></table></div>
+  </section>
+
+  <section aria-labelledby="report-h">
+    <div class="sec-head">
+      <div>
+        <h2 id="report-h">Month report</h2>
+        <p class="lede">One month at one place, set against the same month in each year from 2016 to 2025. A month in progress is compared over the same days. This section always uses observed data.</p>
+      </div>
+      <div class="controls">
+        <label class="field" for="rCity"><span class="eyebrow">Place</span><select id="rCity"></select></label>
+        <label class="field" for="rMonth"><span class="eyebrow">Month</span><select id="rMonth"></select></label>
+      </div>
+    </div>
+    <div class="report">
+      <div>
+        <p class="headline" id="headline"></p>
+        <p class="note" id="rNote" style="margin:0"></p>
+        <div class="scroll"><table class="metrics" id="metrics"></table></div>
+        <p class="note" style="margin-top:8px"><span class="swatch" style="background:var(--neutral);border-radius:50%"></span>each year 2016–2025 &nbsp; <span class="swatch" style="background:var(--ink-3);width:2px;border-radius:0"></span>average &nbsp; <span class="swatch" style="background:var(--better);border-radius:50%"></span>better &nbsp; <span class="swatch" style="background:var(--worse);border-radius:50%"></span>worse for riding</p>
+      </div>
+      <div style="display:grid;gap:26px;align-content:start">
+        <div class="chart">
+          <h3>Score against normal, last 13 months</h3>
+          <p class="note" style="margin:4px 0 6px">Difference from the 2016–2025 average for that calendar month. Select a bar to open that month.</p>
+          <svg id="anChart" height="200"></svg>
+        </div>
+        <div>
+          <h3>Recent days</h3>
+          <p class="note" style="margin:4px 0 0">Letters mark what ruled a day out: R rain, W wind, H heat and humidity (humidex), A air quality, T temperature. A dashed outline marks preliminary data.</p>
+          <div class="cal" id="cal"></div>
+          <div class="key" id="calKey"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section aria-labelledby="method-h">
+    <div class="cols">
+      <div>
+        <h2 id="method-h">How a day is scored</h2>
+        <ul class="rules" id="rules"></ul>
+      </div>
+      <div>
+        <h2 id="sources-h">Data and credits</h2>
+        <ul class="credits">
+          <li><b>ERA5 reanalysis</b>, ECMWF / Copernicus Climate Change Service (C3S): hourly 2 m temperature, total precipitation and 10 m wind. The global map uses the <a href="https://cds.climate.copernicus.eu/datasets/reanalysis-era5-single-levels-timeseries" target="_blank" rel="noopener">ERA5 hourly time-series</a> from the Climate Data Store. Hersbach, H. et al. (2020), <cite>The ERA5 global reanalysis</cite>, Q. J. R. Meteorol. Soc. 146, 1999–2049, <a href="https://doi.org/10.1002/qj.3803" target="_blank" rel="noopener">doi:10.1002/qj.3803</a>.</li>
+          <li><b>ERA5-Land</b>, ECMWF / C3S, combined with ERA5 for the place series. Muñoz-Sabater, J. et al. (2021), <cite>ERA5-Land: a state-of-the-art global reanalysis dataset for land applications</cite>, Earth Syst. Sci. Data 13, 4349–4383, <a href="https://doi.org/10.5194/essd-13-4349-2021" target="_blank" rel="noopener">doi:10.5194/essd-13-4349-2021</a>.</li>
+          <li><b>Air quality</b>, Copernicus Atmosphere Monitoring Service (CAMS): European air quality reanalyses and forecasts (Europe, from 2013) and global atmospheric composition forecasts (worldwide, from August 2022), as the European Air Quality Index.</li>
+          <li><b>Open-Meteo</b> serves the ERA5, ERA5-Land and CAMS series used for the places, and CAMS for the map. Zippenfenig, P. (2023), <cite>Open-Meteo.com Weather API</cite>, Zenodo, <a href="https://doi.org/10.5281/zenodo.7970649" target="_blank" rel="noopener">doi:10.5281/zenodo.7970649</a>. Data licensed CC BY 4.0.</li>
+          <li><b>ERA5 dew point</b> (for the humidex) comes from the same ERA5 hourly time-series on the map, and from Open-Meteo for the places.</li>
+          <li><b>CMIP6 climate projections</b>, SSP2-4.5, monthly near-surface air temperature and precipitation, from the <a href="https://cds.climate.copernicus.eu/datasets/projections-cmip6" target="_blank" rel="noopener">C3S Climate Data Store</a>. Eyring, V. et al. (2016), <cite>Overview of the Coupled Model Intercomparison Project Phase 6 (CMIP6)</cite>, Geosci. Model Dev. 9, 1937–1958, <a href="https://doi.org/10.5194/gmd-9-1937-2016" target="_blank" rel="noopener">doi:10.5194/gmd-9-1937-2016</a>; O’Neill, B. C. et al. (2016), <cite>The Scenario Model Intercomparison Project (ScenarioMIP) for CMIP6</cite>, Geosci. Model Dev. 9, 3461–3482, <a href="https://doi.org/10.5194/gmd-9-3461-2016" target="_blank" rel="noopener">doi:10.5194/gmd-9-3461-2016</a>. Models: <span id="modelList"></span>. We acknowledge the World Climate Research Programme and the modelling groups for producing and sharing their output (CC BY 4.0).</li>
+          <li><b>Base map</b>: Natural Earth (public domain), via <a href="https://github.com/topojson/world-atlas" target="_blank" rel="noopener">world-atlas</a>. <b>Land mask</b>: global-land-mask, derived from NOAA GLOBE 1 km elevation data. Drawn with D3.</li>
+        </ul>
+        <p class="legal">Contains modified Copernicus Climate Change Service information <span class="yr"></span>. Contains modified Copernicus Atmosphere Monitoring Service information <span class="yr"></span>. Neither the European Commission nor ECMWF is responsible for any use that may be made of the information it contains.</p>
+      </div>
+    </div>
+  </section>
+</div>
+<div class="tip" id="tip" hidden></div>
+
+<script>
+const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+const MON = MONTHS.map(m => m.slice(0, 3));
+const COUNTRY = { "Kraków":"PL","Gdańsk":"PL","Wrocław":"PL","Warsaw":"PL","Brussels":"BE","Amsterdam":"NL","London":"UK","Berlin":"DE","Graz":"AT","Nice":"FR",
+  "Alicante":"ES","Málaga":"ES","Bilbao":"ES","Santa Cruz de Tenerife":"ES","Palermo (Sicily)":"IT","Catania (Sicily)":"IT","Rome":"IT","Split":"HR","Larnaca":"CY",
+  "New York":"US","San Francisco":"US","Mountain View":"US","Seattle":"US","Tucson":"US","Austin":"US","Miami":"US",
+  "Bogotá":"CO","São Paulo":"BR","Buenos Aires":"AR","Cape Town":"ZA","Tokyo":"JP","Seoul":"KR","Sydney":"AU","Melbourne":"AU" };
+const REGION = c => (c.lon > -30 && c.lon < 45 && c.lat > 27) ? (c.lat > 46.5 ? "Northern and central Europe" : "Southern Europe and the Mediterranean")
+  : c.lon <= -30 ? (c.lat > 15 ? "North America" : "South America") : c.lat < 0 ? "Africa and Oceania" : "East Asia";
+const REGION_ORDER = ["Northern and central Europe", "Southern Europe and the Mediterranean", "North America", "South America", "East Asia", "Africa and Oceania"];
+
+const root = document.documentElement;
+const tok = n => getComputedStyle(root).getPropertyValue(n).trim();
+let rampFn, lut, divFn, lutC;
+function refreshPalette() {
+  rampFn = d3.interpolateRgbBasis(d3.range(7).map(i => tok(`--r${i}`)));
+  lut = d3.range(251).map(i => d3.rgb(rampFn(i / 250)));
+  divFn = d3.interpolateRgbBasis(d3.range(7).map(i => tok(`--c${i}`)));
+  lutC = d3.range(251).map(i => d3.rgb(divFn(i / 250)));
+}
+const col = v => v == null ? tok("--land-empty") : rampFn(Math.max(0, Math.min(1, v)));
+// Change in day score on the diverging ramp, ±CHG at the ends.
+const CHG = () => GRID?.change_range ?? 0.05;
+const colC = v => v == null ? tok("--land-empty") : divFn(Math.max(0, Math.min(1, 0.5 + v / CHG() / 2)));
+const inkOn = v => d3.hsl(col(v)).l > 0.58 ? "#15201d" : "#f2f6f4";
+const inkOnC = v => d3.hsl(colC(v)).l > 0.58 ? "#15201d" : "#f2f6f4";
+const TIERS = [[1, "Ideal"], [0.5, "Medium"], [0.25, "Low"], [0, "Not rideable"]];
+
+const fmt = (v, d = 1) => v == null || Number.isNaN(v) ? "–" : (+v).toFixed(d);
+const pct = v => v == null ? "–" : Math.round(v * 100) + "%";
+const sgn = (v, d = 1) => v == null ? "–" : (Math.abs(v) < 0.5 * 10 ** -d ? "±" : v > 0 ? "+" : "−") + Math.abs(v).toFixed(d);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const short = n => n.replace(/ \(Sicily\)/, "").replace("Santa Cruz de Tenerife", "Tenerife");
+
+const tip = document.getElementById("tip");
+function showTip(e, html) {
+  tip.innerHTML = html; tip.hidden = false;
+  const x = Math.min(e.clientX + 14, innerWidth - tip.offsetWidth - 10), y = Math.min(e.clientY + 14, innerHeight - tip.offsetHeight - 10);
+  tip.style.left = Math.max(8, x) + "px"; tip.style.top = Math.max(8, y) + "px";
+}
+const hideTip = () => { tip.hidden = true; };
+
+const state = { month: new Date().getMonth(), layer: "score", sort: "region", city: "Kraków", period: "now" };
+// "fut" shows the projection, "chg" the difference between the projection and the observed decade.
+const futOn = () => state.period !== "now";
+const chgOn = () => state.period === "chg";
+// Difference next − last for a place and month, in day score or ideal share.
+const dOf = (c, m, k = "score") => climOf(c, true)[m][k] - c.climatology[m][k];
+// Climatology of a place for the selected period (projected falls back to observed if absent).
+const climOf = (c, fut = futOn()) => (fut && c.climatology_future) || c.climatology;
+// One shape for a month's summary, from a place or a grid point.
+const fromClim = x => ({ s: x.score, i: x.ideal_frac, md: x.medium_frac, lo: x.low_frac, t: x.t_max, hx: x.hx,
+  rv: x.rain_veto_frac, wv: x.wind_veto_frac, hv: x.humid_frac, av: x.aq_veto_frac });
+// Grid points store shares as whole percent; the projected block omits wind and air (unchanged).
+const fromPoint = (p, m, base) => { const o = {};
+  for (const k of ["s","i","md","lo","t","hx","rv","wv","hv","av"]) { const v = p[k]?.[m] ?? base?.[k]?.[m]; o[k] = v == null || k === "t" || k === "hx" || !GRID.pct ? v : v / 100; }
+  return o; };
+const MODEL_NAMES = { mpi_esm1_2_lr: "MPI-ESM1-2-LR (MPI-M)", miroc6: "MIROC6 (JAMSTEC, AORI, NIES, R-CCS)", mri_esm2_0: "MRI-ESM2-0 (MRI)",
+  noresm2_mm: "NorESM2-MM (NCC)", cnrm_cm6_1: "CNRM-CM6-1 (CNRM-CERFACS)", access_cm2: "ACCESS-CM2 (CSIRO-ARCCSS)",
+  ipsl_cm6a_lr: "IPSL-CM6A-LR (IPSL)", ec_earth3_cc: "EC-Earth3-CC (EC-Earth Consortium)" };
+let CITIES, GRID, WORLD;
+
+// A self-contained snapshot embeds its data in window.SNAPSHOT instead of fetching files.
+const SNAP = window.SNAPSHOT;
+Promise.all(SNAP ? [SNAP.cities, SNAP.grid, SNAP.world] : [
+  fetch("data/cities.json").then(r => r.json()),
+  fetch("data/grid.json").then(r => r.ok ? r.json() : null).catch(() => null),
+  fetch("https://cdn.jsdelivr.net/npm/world-atlas@2.0.2/countries-50m.json").then(r => r.json()).catch(() => null),
+]).then(([c, g, w]) => {
+  CITIES = c; GRID = g; WORLD = w;
+  if (!CITIES.cities.some(x => x.name === state.city)) state.city = CITIES.cities[0].name;
+  refreshPalette();
+  buildStatic(); buildControls(); renderAll(); bindMapHover(); buildReport();
+  addEventListener("resize", debounce(() => { drawMap(); renderReport(); }, 150));
+  matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { refreshPalette(); layerCache.clear(); buildRules(); renderAll(); renderReport(); });
+  // Without projections in the data, the period switch has nothing to show.
+  if (!CITIES.projection) document.querySelectorAll('#period button[data-p="fut"], #period button[data-p="chg"]').forEach(b => b.disabled = true);
+});
+function debounce(f, ms) { let t; return () => { clearTimeout(t); t = setTimeout(f, ms); }; }
+
+function buildStatic() {
+  const gen = new Date(CITIES.generated + "T12:00:00");
+  const last = CITIES.cities.map(c => c.data_through).sort().at(-1);
+  document.getElementById("stamp").innerHTML = `
+    <dt>Weather</dt><dd>ERA5 hourly, ${CITIES.baseline[0]}–${CITIES.baseline[1]}</dd>
+    <dt>Air quality</dt><dd>CAMS, European AQI</dd>
+    <dt>Outlook</dt><dd>${CITIES.projection ? `CMIP6 ${CITIES.projection.scenario}, ${CITIES.projection.models.length} models` : "not built"}</dd>
+    <dt>Places</dt><dd>${CITIES.cities.length}, data to ${last}</dd>
+    <dt>Built</dt><dd>${gen.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}</dd>`;
+  document.querySelectorAll(".legal .yr").forEach(s => s.textContent = gen.getFullYear());
+  document.getElementById("modelList").textContent = (CITIES.projection?.models ?? []).map(m => MODEL_NAMES[m] ?? m).join(", ") || "not yet downloaded";
+  buildRules();
+}
+
+function buildControls() {
+  d3.select("#months").selectAll("button").data(MON).join("button").attr("type", "button").text(d => d)
+    .attr("aria-label", (d, i) => MONTHS[i])
+    .on("click", (e, d) => { state.month = MON.indexOf(d); renderAll(); });
+  document.querySelectorAll("#layer button").forEach(b => b.onclick = () => { state.layer = b.dataset.l; renderAll(); });
+  document.querySelectorAll("#period button").forEach(b => b.onclick = () => { state.period = b.dataset.p; renderAll(); renderReport(); });
+  document.querySelectorAll("#sort button").forEach(b => b.onclick = () => { state.sort = b.dataset.s; syncPressed(); drawMatrix(); });
+}
+function syncPressed() {
+  document.querySelectorAll("#months button").forEach((b, i) => b.setAttribute("aria-pressed", i === state.month));
+  document.querySelectorAll("#layer button").forEach(b => b.setAttribute("aria-pressed", b.dataset.l === state.layer));
+  document.querySelectorAll("#sort button").forEach(b => { b.setAttribute("aria-pressed", b.dataset.s === state.sort);
+    b.textContent = { region: "By region", month: chgOn() ? "Biggest gain in month" : "Best in month", year: chgOn() ? "Biggest gain year-round" : "Best year-round" }[b.dataset.s]; });
+  document.querySelectorAll("#period button").forEach(b => b.setAttribute("aria-pressed", b.dataset.p === state.period));
+}
+function renderAll() {
+  syncPressed();
+  const P = CITIES.projection?.years ?? [2026, 2035], B = CITIES.baseline, ideal = state.layer === "ideal_frac";
+  document.getElementById("rankMonth").textContent = MONTHS[state.month] + (chgOn() ? `, change ${P[0]}–${String(P[1]).slice(2)} vs ${B[0]}–${String(B[1]).slice(2)}` : futOn() ? `, ${P[0]}–${P[1]}` : "");
+  document.getElementById("monthName").textContent = MONTHS[state.month] + (chgOn() ? ": what changes over the next 10 years" : futOn() ? " over the next 10 years" : "");
+  document.getElementById("matrixLede").textContent = chgOn()
+    ? `Projected change in ride days, ${P[0]}–${P[1]} minus ${B[0]}–${B[1]}: per month in the month columns, per year in the last. Green gets better for riding, brown gets worse. Hover a cell for both scores.`
+    : futOn()
+    ? `Projected average day score for ${P[0]}–${P[1]}: the hourly weather of ${B[0]}–${B[1]} shifted by the CMIP6 change for each place and month. Hover a cell to compare with ${B[0]}–${B[1]}.`
+    : "Average day score for each place, from 10 years of hourly data. Hover a cell to see what limits it; select one to map that month.";
+  document.getElementById("matrixPeriod").textContent = chgOn() ? `Change, ${P[0]}–${String(P[1]).slice(2)} minus ${B[0]}–${String(B[1]).slice(2)}` : futOn() ? `Projected, ${P[0]}–${P[1]}` : `Observed, ${B[0]}–${B[1]}`;
+  document.getElementById("atlasLede").textContent = chgOn()
+    ? `Projected change in ${ideal ? "the share of ideal days" : "the average day score"}, ${P[0]}–${P[1]} minus ${B[0]}–${B[1]}. The scale is in ${ideal ? "ideal" : "ride"} days a month and runs to ±${fmt(CHG() * 30, 1)}.`
+    : ideal ? "Share of days that are ideal for riding: at least 6 hours at 18–30 °C, dry, calm and not too humid."
+    : "Average day score for the month. An ideal day counts 1, a medium day 0.5 and a low day 0.25.";
+  drawOutlook(); drawLegend(); drawMap(); drawRanking(); drawMatrix();
+}
+function drawOutlook() {
+  const el = document.getElementById("outlook"), P = CITIES.projection;
+  el.hidden = !futOn() || !P;
+  if (el.hidden) return;
+  const m = state.month, dts = CITIES.cities.filter(c => c.delta).map(c => c.delta.t[m]);
+  const ch = CITIES.cities.map(c => dOf(c, m));
+  const up = ch.filter(v => v > 0.005).length, down = ch.filter(v => v < -0.005).length;
+  el.innerHTML = `<b>Projected for ${P.years[0]}–${P.years[1]}.</b> Each hour of ${CITIES.baseline[0]}–${CITIES.baseline[1]} is shifted by the change the CMIP6 models project between the two decades under ${P.scenario}, a middle-of-the-road emissions path (mean of ${P.models.length} models). ` +
+    `In ${MONTHS[m]} the places warm by ${sgn(d3.min(dts))} to ${sgn(d3.max(dts))} °C; ${up} of ${ch.length} get better for riding and ${down} get worse. ` +
+    `Dew point, and so the humidex, rises with temperature at the same relative humidity, rain scales with the projected monthly change, and wind and air quality stay as observed. This is a shift in the average climate, not a forecast for any one year.`;
+}
+function drawLegend() {
+  const chg = chgOn();
+  d3.select("#ramp").selectAll("i").data(d3.range(7)).join("i").style("background", i => `var(--${chg ? "c" : "r"}${i})`);
+  const r = CHG();
+  document.getElementById("ticks").innerHTML = (chg ? [-r, -r / 2, 0, r / 2, r].map(v => sgn(v * 30, v && Math.abs(v * 30) < 1 ? 2 : 1)) : ["0", "0.25", "0.5", "0.75", "1"]).map(t => `<span>${t}</span>`).join("");
+  const unit = state.layer === "ideal_frac" ? "ideal" : "ride";
+  document.getElementById("cap").innerHTML = chg ? `<span>Fewer ${unit} days a month</span><span>More ${unit} days a month</span>` : "<span>Rarely rideable</span><span>Ideal nearly every day</span>";
+}
+
+/* ---------------- map ---------------- */
+const LAT_MAX = 72, LAT_MIN = -56;
+let proj, zt = d3.zoomIdentity, zoomer, mapW = 0, mapH = 0;
+const layerCache = new Map();   // "layer|month|theme" -> coloured canvas
+const byteCache = new Map();    // "layer|month" -> Promise<Uint8ClampedArray>
+
+function layerBytes(layer, m) {
+  const k = layer + "|" + m;
+  if (!byteCache.has(k)) byteCache.set(k, new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const c = document.createElement("canvas"); c.width = img.width; c.height = img.height;
+      const x = c.getContext("2d", { willReadFrequently: true }); x.drawImage(img, 0, 0);
+      resolve(x.getImageData(0, 0, img.width, img.height).data);   // grey PNG: value in every channel
+    };
+    img.onerror = reject;
+    img.src = GRID.layers[layer][m];
+  }));
+  return byteCache.get(k);
+}
+// The raster for the current view: change, or a score layer for the selected period.
+const layerKey = () => chgOn() ? (state.layer === "ideal_frac" ? "change_i" : "change")
+  : (futOn() && GRID?.layers[state.layer + "_f"] ? state.layer + "_f" : state.layer);
+async function colouredLayer(layer, m) {
+  const k = `${layer}|${m}|${isDarkNow()}`, L = layer.startsWith("change") ? lutC : lut;
+  if (layerCache.has(k)) return layerCache.get(k);
+  const px = await layerBytes(layer, m);
+  const c = document.createElement("canvas"); c.width = GRID.w; c.height = GRID.h;
+  const x = c.getContext("2d"), img = x.createImageData(GRID.w, GRID.h);
+  for (let i = 0, j = 0; i < px.length; i += 4, j++) {
+    const v = px[i]; if (v === 255) continue;
+    const col = L[v]; img.data[i] = col.r; img.data[i + 1] = col.g; img.data[i + 2] = col.b; img.data[i + 3] = 255;
+  }
+  x.putImageData(img, 0, 0);
+  layerCache.set(k, c);
+  return c;
+}
+const isDarkNow = () => root.dataset.theme === "dark" || (root.dataset.theme !== "light" && matchMedia("(prefers-color-scheme: dark)").matches);
+
+function setupZoom() {
+  const frame = document.getElementById("mapframe");
+  zoomer = d3.zoom().scaleExtent([1, 12])
+    // Plain wheel scrolls the page; Ctrl/Cmd + wheel, pinch, buttons and drag (once zoomed) move the map.
+    .filter(e => e.type === "wheel" ? (e.ctrlKey || e.metaKey) : e.type.startsWith("touch") ? (e.touches.length > 1 || zt.k > 1) : (!e.button && (e.type !== "mousedown" || zt.k > 1)))
+    .on("zoom", e => { zt = e.transform; frame.classList.toggle("zoomed", zt.k > 1); document.getElementById("zoomhint").hidden = zt.k > 1; paintMap(); });
+  d3.select(frame).call(zoomer).on("dblclick.zoom", null);
+  document.getElementById("zin").onclick = () => d3.select(frame).transition().duration(250).call(zoomer.scaleBy, 2);
+  document.getElementById("zout").onclick = () => d3.select(frame).transition().duration(250).call(zoomer.scaleBy, 0.5);
+  document.getElementById("zreset").onclick = () => d3.select(frame).transition().duration(300).call(zoomer.transform, d3.zoomIdentity);
+}
+
+function drawMap() {
+  const canvas = document.getElementById("map"), frame = canvas.parentElement;
+  mapW = frame.clientWidth; mapH = Math.round(mapW * (LAT_MAX - LAT_MIN) / 360);
+  const dpr = devicePixelRatio || 1;
+  canvas.width = mapW * dpr; canvas.height = mapH * dpr; canvas.style.height = mapH + "px";
+  const scale = mapW / (2 * Math.PI);
+  proj = d3.geoEquirectangular().scale(scale).translate([mapW / 2, LAT_MAX * Math.PI / 180 * scale]);
+  if (zoomer) zoomer.extent([[0, 0], [mapW, mapH]]).translateExtent([[0, 0], [mapW, mapH]]);
+  if (!zoomer) setupZoom();
+  const note = document.getElementById("gridNote");
+  if (GRID) {
+    const total = GRID.n_target || 3953, n = GRID.n_grid;
+    note.innerHTML = `Interpolated from ${n.toLocaleString("en")} land points on a ${GRID.step}° grid (ERA5 ${GRID.baseline[0]}–${GRID.baseline[1]}${futOn() ? ", shifted by the CMIP6 change" : ""}) plus the ${CITIES.cities.length} places, drawn at ${(GRID.res * 60).toFixed(0)}′ (about ${Math.round(GRID.res * 111)} km). ` +
+      (n < total * 0.98 ? `<b>${Math.round(n / total * 100)}% of the grid has loaded so far</b>; grey land has no data yet. ` : "") +
+      (GRID.n_dew != null && GRID.n_dew < n * 0.98 ? `<b>The humidex limit is applied at ${GRID.n_dew.toLocaleString("en")} of ${n.toLocaleString("en")} map points so far</b> (dew point still downloading), so hot, humid regions look better than they are; the places are complete. ` : "") +
+      `Values between samples are interpolated, so use the table for specific places.`;
+    if (GRID.layers[layerKey()]) colouredLayer(layerKey(), state.month).then(paintMap);
+  } else note.innerHTML = `<span class="warn">The global grid hasn't been built yet. Run <code>build_grid.py fetch-wx</code>, then <code>render</code>.</span>`;
+  paintMap();
+}
+
+function paintMap() {
+  if (!proj) return;
+  const canvas = document.getElementById("map"), ctx = canvas.getContext("2d"), dpr = devicePixelRatio || 1, k = zt.k;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.fillStyle = tok("--sea"); ctx.fillRect(0, 0, mapW, mapH);
+  ctx.setTransform(dpr * k, 0, 0, dpr * k, dpr * zt.x, dpr * zt.y);
+  const path = d3.geoPath(proj, ctx);
+  ctx.beginPath(); path(worldGeo()?.grat ?? d3.geoGraticule().step([30, 30])()); ctx.strokeStyle = tok("--rule"); ctx.lineWidth = .6 / k; ctx.stroke();
+  const geo = worldGeo();
+  if (geo) { ctx.beginPath(); path(geo.land); ctx.fillStyle = tok("--land-empty"); ctx.fill(); }
+  const layer = GRID && layerCache.get(`${layerKey()}|${state.month}|${isDarkNow()}`);
+  if (layer) {
+    // The raster runs slightly past the coast; clipping to the vector land keeps coasts crisp.
+    ctx.save();
+    if (geo) { ctx.beginPath(); path(geo.land); ctx.clip(); }
+    ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = "high"; ctx.drawImage(layer, 0, 0, mapW, mapH);
+    ctx.restore();
+  }
+  if (geo) {
+    ctx.beginPath(); path(geo.borders); ctx.strokeStyle = tok("--border-line"); ctx.lineWidth = .5 / Math.sqrt(k); ctx.stroke();
+    ctx.beginPath(); path(geo.land); ctx.lineWidth = .7 / Math.sqrt(k); ctx.stroke();
+  }
+  drawMarkers();
+}
+
+let _geo;
+const worldGeo = () => WORLD && (_geo ??= { land: topojson.feature(WORLD, WORLD.objects.land),
+  borders: topojson.mesh(WORLD, WORLD.objects.countries, (a, b) => a !== b), grat: d3.geoGraticule().step([30, 30])() });
+const screenXY = d => zt.apply(proj([d.lon, d.lat]));
+function drawMarkers() {
+  const svg = d3.select("#mapsvg").attr("viewBox", `0 0 ${mapW} ${mapH}`); svg.selectAll("*").remove();
+  const m = state.month, sel = d => d.name === state.city;
+  const k = state.layer === "ideal_frac" ? "ideal_frac" : "score";
+  const fill = d => chgOn() ? colC(dOf(d, m, k)) : col(climOf(d)[m][k]);
+  const r = Math.min(7, 4.2 + Math.log2(zt.k));
+  const vis = CITIES.cities.filter(d => { const [x, y] = screenXY(d); return x > -10 && x < mapW + 10 && y > -10 && y < mapH + 10; });
+  svg.selectAll("circle").data([...vis].sort((a, b) => sel(a) - sel(b))).join("circle")
+    .attr("transform", d => `translate(${screenXY(d)})`)
+    .attr("r", d => sel(d) ? r + 1.8 : r).attr("fill", fill)
+    .attr("stroke", tok("--ink")).attr("stroke-width", d => sel(d) ? 2 : 1.1);
+  if (mapW < 640 && zt.k < 2) return;
+  // Label greedily, selected place first, then best score; skip labels that would collide.
+  const placed = vis.map(d => { const [x, y] = screenXY(d); return [x - r, y - r, x + r, y + r]; });
+  [...vis].sort((a, b) => sel(b) - sel(a) || climOf(b)[m].score - climOf(a)[m].score).forEach(d => {
+    const [x, y] = screenXY(d), label = short(d.name), w = label.length * 6.1 + 4;
+    for (const [dx, anchor] of [[r + 4, "start"], [-(r + 4), "end"]]) {
+      const box = dx > 0 ? [x + dx - 1, y - 7, x + dx + w, y + 7] : [x + dx - w, y - 7, x + dx + 1, y + 7];
+      if (box[0] < 0 || box[2] > mapW) continue;
+      const own = [x - r, y - r, x + r, y + r];
+      if (placed.some(p => !(box[2] < p[0] || box[0] > p[2] || box[3] < p[1] || box[1] > p[3]) && p.join() !== own.join())) continue;
+      placed.push(box);
+      svg.append("text").attr("x", x + dx).attr("y", y + 4).attr("text-anchor", anchor).text(label).style("font-weight", sel(d) ? 700 : 500);
+      break;
+    }
+  });
+}
+
+function mapPointer(e) {
+  const r = document.getElementById("map").getBoundingClientRect();
+  return [e.clientX - r.left, e.clientY - r.top];
+}
+function bindMapHover() {
+  const frame = document.getElementById("mapframe");
+  d3.select(frame).on("mousemove.tip", e => {
+    if (e.target.closest(".zoom")) return hideTip();
+    const [mx, my] = mapPointer(e);
+    let city = null, cd = 100;
+    for (const c of CITIES.cities) { const [x, y] = screenXY(c); const d2 = (x - mx) ** 2 + (y - my) ** 2; if (d2 < cd) { cd = d2; city = c; } }
+    if (city) { frame.style.cursor = "pointer"; return showTip(e, cityTip(city, state.month)); }
+    frame.style.cursor = "";
+    if (!GRID) return hideTip();
+    const [lon, lat] = proj.invert(zt.invert([mx, my]));
+    let best = null, bd = 1e9;
+    for (const p of GRID.points) { const dl = Math.abs(p.lon - lon), dx = Math.min(dl, 360 - dl) * Math.cos(lat * Math.PI / 180), dy = p.lat - lat, d2 = dx*dx + dy*dy; if (d2 < bd) { bd = d2; best = p; } }
+    if (!best || bd > (GRID.step * 1.2) ** 2) return hideTip();
+    const m = state.month, now = fromPoint(best, m), fut = best.f ? fromPoint(best.f, m, best) : null;
+    showTip(e, `<b>${fmt(Math.abs(best.lat), 2)}°${best.lat >= 0 ? "N" : "S"} ${fmt(Math.abs(best.lon), 2)}°${best.lon >= 0 ? "E" : "W"}</b> <span class="k">nearest grid point</span>
+      ${tipRows(m, futOn() && fut ? fut : now, futOn() && fut ? now : null)}`);
+  }).on("mouseleave.tip", () => { hideTip(); frame.style.cursor = ""; })
+    .on("click.city", e => {
+      if (e.defaultPrevented) return;   // end of a drag
+      const [mx, my] = mapPointer(e);
+      const c = CITIES.cities.find(c => { const [x, y] = screenXY(c); return (x - mx) ** 2 + (y - my) ** 2 < 100; });
+      if (c) selectCity(c.name, true);
+    });
+}
+// x: the month's summary for the shown period; base: the observed one, when x is projected.
+function tipRows(m, x, base) {
+  const vs = (a, b, d, u = "") => base ? ` <span class="k">(${sgn(a - b, d)}${u})</span>` : "";
+  return `<div class="row" style="margin-top:6px"><span>${base ? `${MON[m]} score, 2026–35` : `${MONTHS[m]} day score`}</span><b class="num">${fmt(x.s, 2)}${vs(x.s, base?.s, 2)}</b></div>
+    <div class="row"><span class="k">Ideal / medium / low days</span><span class="num">${pct(x.i)} / ${pct(x.md)} / ${pct(x.lo)}</span></div>
+    <div class="row"><span class="k">Average daily high</span><span class="num">${fmt(x.t)} °C${vs(x.t, base?.t, 1)}</span></div>
+    ${x.hx != null ? `<div class="row"><span class="k">Average daily peak humidex</span><span class="num">${fmt(x.hx)}${vs(x.hx, base?.hx, 1)}</span></div>` : ""}
+    <div class="row"><span class="k">Lost to rain / wind / air</span><span class="num">${pct(x.rv)} / ${pct(x.wv)} / ${pct(x.av)}</span></div>
+    ${x.hv != null ? `<div class="row"><span class="k">Downgraded by heat and humidity</span><span class="num">${pct(x.hv)}</span></div>` : ""}`;
+}
+function cityTip(c, m) {
+  const x = climOf(c)[m], fut = futOn() && c.climatology_future;
+  return `<b>${esc(c.name)}</b> <span class="k">${COUNTRY[c.name] ?? ""}</span>${tipRows(m, fromClim(x), fut ? fromClim(c.climatology[m]) : null)}
+    <div class="row"><span class="k">Ride days in 30</span><span class="num">${fmt(x.score * 30, 1)}</span></div>
+    ${fut && c.delta ? `<div class="row"><span class="k">Projected warming, rain</span><span class="num">${sgn(c.delta.t[m])} °C, ${sgn((c.delta.rain[m] - 1) * 100, 0)}%</span></div>` : ""}`;
+}
+
+/* ---------------- ranking ---------------- */
+function drawRanking() {
+  const m = state.month;
+  const chg = chgOn(), key = c => chg ? dOf(c, m) : climOf(c)[m].score;
+  const list = [...CITIES.cities].sort((a, b) => key(b) - key(a) || climOf(b)[m].score - climOf(a)[m].score);
+  d3.select("#rankList").selectAll("li").data(list, d => d.name).join("li")
+    .attr("class", d => d.name === state.city ? "sel" : null).attr("tabindex", 0)
+    .on("click", (e, d) => selectCity(d.name, true)).on("keydown", (e, d) => { if (e.key === "Enter") selectCity(d.name, true); })
+    .on("mousemove", (e, d) => showTip(e, cityTip(d, m))).on("mouseleave", hideTip)
+    .html((d, i) => { const x = climOf(d)[m], dv = x.score - d.climatology[m].score;
+      if (chg) { const w = Math.min(1, Math.abs(dv) / CHG()) * 50;
+        return `<span class="pos">${String(i + 1).padStart(2, "0")}</span>
+        <span class="nm">${esc(d.name)}<small>${COUNTRY[d.name] ?? ""}</small></span>
+        <span class="was">${fmt(d.climatology[m].score, 2)} → ${fmt(x.score, 2)}</span>
+        <span class="sc" title="Ride days a month">${sgn(dv * 30, 1)}</span>
+        <span class="bar div" aria-hidden="true"><i style="${dv >= 0 ? "left:50%" : `left:${50 - w}%`};width:${w}%;background:${colC(dv)}"></i></span>`; }
+      return `<span class="pos">${String(i + 1).padStart(2, "0")}</span>
+        <span class="nm">${esc(d.name)}<small>${COUNTRY[d.name] ?? ""}</small></span>
+        <span class="dl" style="color:${Math.abs(dv) < 0.005 ? "var(--ink-3)" : dv > 0 ? "var(--better)" : "var(--worse)"}">${futOn() ? sgn(dv, 2) : ""}</span>
+        <span class="sc">${fmt(x.score, 2)}</span>
+        <span class="bar" aria-hidden="true">
+          <i style="width:${x.ideal_frac * 100}%;background:${col(1)}"></i>
+          <i style="width:${x.medium_frac * 100}%;background:${col(.5)}"></i>
+          <i style="width:${x.low_frac * 100}%;background:${col(.25)}"></i></span>`; })
+    .order();
+  document.getElementById("rankKey").innerHTML = chg
+    ? `<span><i class="swatch" style="background:${colC(CHG())}"></i>Better for riding</span><span><i class="swatch" style="background:${colC(-CHG())}"></i>Worse</span><span>Score ${CITIES.baseline[0]}–${String(CITIES.baseline[1]).slice(2)} → ${CITIES.projection?.years.join("–")}, then the change in ride days a month</span>`
+    : TIERS.slice(0, 3).map(([v, l]) => `<span><i class="swatch" style="background:${col(v)}"></i>${l}</span>`).join("") + `<span>Bars show the share of days</span>` + (futOn() ? `<span>Small figures: change from 2016–2025</span>` : "");
+}
+
+/* ---------------- matrix ---------------- */
+function drawMatrix() {
+  const m = state.month, t = d3.select("#matrix"); t.selectAll("*").remove();
+  const chg = chgOn(), annual = c => d3.mean(climOf(c), x => x.score), annual0 = c => d3.mean(c.climatology, x => x.score);
+  // Value shown in a cell: the score, or in the change view the difference next − last.
+  const val = chg ? (c, i) => dOf(c, i) : (c, i) => climOf(c)[i].score, yv = chg ? c => annual(c) - annual0(c) : annual;
+  const bg = chg ? colC : col, ink = chg ? inkOnC : inkOn;
+  // The change view counts ride days (a month in 30 days, a year in 365): score differences are too small to read.
+  const txt = chg ? v => sgn(v * 30, 1) : v => fmt(v, 2), ytxt = chg ? v => sgn(v * 365, 0) : v => fmt(v, 2);
+  const hr = t.append("thead").append("tr");
+  hr.append("th").attr("class", "place").attr("scope", "col").text("");
+  MON.forEach((n, i) => hr.append("th").attr("scope", "col").attr("class", i === m ? "cur" : null).text(n));
+  hr.append("th").attr("scope", "col").text(chg ? "Year, days" : "Year");
+  const body = t.append("tbody");
+  const groups = state.sort === "region"
+    ? REGION_ORDER.map(r => [r, CITIES.cities.filter(c => REGION(c) === r)]).filter(g => g[1].length)
+    : [[null, [...CITIES.cities].sort((a, b) => state.sort === "month" ? val(b, m) - val(a, m) : yv(b) - yv(a))]];
+  for (const [name, cities] of groups) {
+    if (name) body.append("tr").attr("class", "grp").append("th").attr("colspan", 14).attr("scope", "colgroup").attr("class", "eyebrow").text(name);
+    for (const c of cities) {
+      const tr = body.append("tr");
+      tr.append("th").attr("class", "place").attr("scope", "row").html(`${esc(c.name)}<small>${COUNTRY[c.name] ?? ""}</small>`);
+      climOf(c).forEach((x, i) => tr.append("td").attr("class", i === m ? "cur" : null)
+        .style("background", bg(val(c, i))).style("color", ink(val(c, i))).text(txt(val(c, i)))
+        .on("mousemove", e => showTip(e, cityTip(c, i))).on("mouseleave", hideTip)
+        .on("click", () => { state.month = i; renderAll(); }));
+      const a = annual(c), a0 = annual0(c);
+      tr.append("td").attr("class", "yr").style("background", bg(yv(c))).style("color", ink(yv(c))).text(ytxt(yv(c)))
+        .on("mousemove", e => showTip(e, `<b>${esc(c.name)}</b><div class="row" style="margin-top:6px"><span class="k">Average day score, all year${futOn() ? ", 2026–35" : ""}</span><b class="num">${fmt(a, 2)}${futOn() ? ` <span class="k">(${sgn(a - a0, 3)})</span>` : ""}</b></div><div class="row"><span class="k">Ride days a year</span><span class="num">${Math.round(a * 365)}${futOn() ? ` <span class="k">(${sgn((a - a0) * 365, 0)})</span>` : ""}</span></div>`))
+        .on("mouseleave", hideTip);
+    }
+  }
+}
+
+/* ---------------- report ---------------- */
+const METRICS = [
+  ["good_days", "Ride days", "sum of day scores", v => fmt(v, 1), 1, 1, ""],
+  ["score", "Day score", "average", v => fmt(v, 2), 2, 1, ""],
+  ["t_mean", "Temperature", "daily mean", v => fmt(v, 1) + " °C", 1, 0, " °C"],
+  ["rain_mm", "Rain", "total", v => fmt(v, 0) + " mm", 0, -1, " mm"],
+  ["wind_max", "Wind", "average daily peak", v => fmt(v, 0) + " km/h", 0, -1, " km/h"],
+  ["hx", "Humidex", "average daily peak", v => fmt(v, 1), 1, -1, ""],
+  ["aqi", "Air quality", "daytime European AQI", v => fmt(v, 0), 0, -1, ""],
+];
+function buildReport() {
+  const cs = document.getElementById("rCity");
+  [...CITIES.cities].sort((a, b) => a.name.localeCompare(b.name)).forEach(c => cs.add(new Option(c.name, c.name)));
+  cs.value = state.city;
+  cs.onchange = () => selectCity(cs.value, false);
+  document.getElementById("rMonth").onchange = renderReport;
+  fillMonths(); renderReport();
+}
+const curCity = () => CITIES.cities.find(c => c.name === state.city);
+function selectCity(name, scroll) {
+  state.city = name; document.getElementById("rCity").value = name;
+  fillMonths(); renderReport(); drawRanking(); paintMap();
+  if (scroll) document.getElementById("report-h").scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" });
+}
+function fillMonths() {
+  const ms = document.getElementById("rMonth"); ms.innerHTML = "";
+  curCity().anomaly.slice().reverse().forEach((r, i) => ms.add(new Option(`${MONTHS[r.month - 1]} ${r.year}${r.partial ? ` (1–${r.through_day}, in progress)` : ""}`, i)));
+}
+const curRow = () => { const a = curCity().anomaly; return a[a.length - 1 - (+document.getElementById("rMonth").value || 0)]; };
+
+function headline(c, r) {
+  const g = r.metrics.good_days, n = g.base_n, mn = MONTHS[r.month - 1];
+  const span = r.partial ? `${mn} 1–${r.through_day}, ${r.year}` : `${mn} ${r.year}`;
+  const bv = (g.base_values || []).filter(v => v != null);
+  const lower = bv.filter(v => v < g.value).length, higher = bv.filter(v => v > g.value).length;
+  const period = r.partial ? `${mn} 1–${r.through_day}` : mn;
+  let verdict;
+  if (bv.length && lower === bv.length) verdict = `The most for ${period} in the ${n} years since ${CITIES.baseline[0]}.`;
+  else if (bv.length && higher === bv.length) verdict = `The fewest for ${period} in the ${n} years since ${CITIES.baseline[0]}.`;
+  else if (Math.abs(g.value - g.base_mean) < 0.15 * Math.max(1, g.base_mean)) verdict = "About normal for the time of year.";
+  else if (!bv.length) verdict = g.value > g.base_mean ? "Better than usual." : "Worse than usual.";
+  else verdict = g.value > g.base_mean ? `More than in ${lower} of the ${n} years since ${CITIES.baseline[0]}.` : `Fewer than in ${higher} of the ${n} years since ${CITIES.baseline[0]}.`;
+  return `${esc(c.name)}, ${span}: ${fmt(g.value, 1)} ride days against a typical ${fmt(g.base_mean, 1)}. ${verdict}`;
+}
+function renderReport() {
+  const c = curCity(), r = curRow(); if (!c || !r) return;
+  document.getElementById("headline").innerHTML = headline(c, r);
+  document.getElementById("rNote").textContent = `Weather from ${c.source ?? "Open-Meteo (ERA5 + ERA5-Land)"}, grid cell ${fmt(c.grid_lat, 2)}°, ${fmt(c.grid_lon, 2)}°${c.elevation != null ? `, elevation ${Math.round(c.elevation)} m` : ""}. Data runs to ${c.data_through}; the last five days are preliminary.` +
+    (c.aq_source && c.aq_source !== "CAMS via Open-Meteo" ? ` Air quality is provisionally taken from the ${c.aq_source}.` :
+     c.aq_since > "2017" ? ` Air quality data starts in ${c.aq_since.slice(0, 7)}, so that comparison covers fewer years.` : "");
+
+  const t = d3.select("#metrics"); t.selectAll("*").remove();
+  t.append("thead").append("tr").html(`<th scope="col">Measure</th><th scope="col">${r.partial ? "So far" : "Actual"}</th><th scope="col">Typical</th><th scope="col">Each year, ${CITIES.baseline[0]}–${CITIES.baseline[1]}</th>`);
+  const tb = t.append("tbody");
+  for (const [k, label, sub, f, dp, dir, unit] of METRICS) {
+    const m = r.metrics[k]; if (!m || m.value == null) continue;
+    const tr = tb.append("tr");
+    tr.append("td").attr("class", "lbl").html(`${label}<small>${sub}</small>`);
+    tr.append("td").attr("class", "v").text(f(m.value));
+    tr.append("td").attr("class", "t").html(`${f(m.base_mean)}<br><span style="color:var(--ink-3)">${sgn(m.anomaly, dp)}${unit}</span>`);
+    drawStrip(tr.append("td").attr("class", "strip"), m, dir, f);
+  }
+  drawAnomalyChart(); drawCalendar(c);
+}
+function drawStrip(cell, m, dir, f) {
+  const vals = (m.base_values || []).map((v, i) => ({ v, y: m.base_years[i] })).filter(d => d.v != null);
+  const W = Math.max(120, cell.node().clientWidth - 12), H = 26;
+  const svg = cell.append("svg").attr("viewBox", `0 0 ${W} ${H}`);
+  const ext = d3.extent([...vals.map(d => d.v), m.value, m.base_mean].filter(v => v != null));
+  if (ext[0] === ext[1]) { ext[0] -= 1; ext[1] += 1; }
+  const x = d3.scaleLinear().domain(ext).range([7, W - 7]);
+  svg.append("line").attr("x1", 7).attr("x2", W - 7).attr("y1", H / 2).attr("y2", H / 2).attr("stroke", tok("--rule-strong"));
+  svg.append("line").attr("x1", x(m.base_mean)).attr("x2", x(m.base_mean)).attr("y1", 4).attr("y2", H - 4).attr("stroke", tok("--ink-3")).attr("stroke-width", 1.5);
+  svg.selectAll("circle.b").data(vals).join("circle").attr("class", "b").attr("cx", d => x(d.v)).attr("cy", H / 2).attr("r", 3.6)
+    .attr("fill", tok("--neutral")).attr("stroke", tok("--sheet")).attr("stroke-width", 1);
+  const spread = d3.deviation(vals, d => d.v) || 0;
+  const good = dir === 0 || Math.abs(m.anomaly) < 0.5 * spread ? null : (m.anomaly * dir > 0);
+  svg.append("circle").attr("cx", x(m.value)).attr("cy", H / 2).attr("r", 6)
+    .attr("fill", good == null ? tok("--ink") : good ? tok("--better") : tok("--worse")).attr("stroke", tok("--sheet")).attr("stroke-width", 2);
+  svg.append("rect").attr("width", W).attr("height", H).attr("fill", "transparent")
+    .on("mousemove", e => { const r = curRow();
+      showTip(e, `<b>${MONTHS[r.month - 1]}${r.partial ? ` 1–${r.through_day}` : ""}, by year</b><div style="margin-top:4px"></div>` +
+        vals.map(d => `<div class="row"><span class="k">${d.y}</span><span class="num">${f(d.v)}</span></div>`).join("") +
+        `<div class="row"><b>${r.year}</b><b class="num">${f(m.value)}</b></div>`); })
+    .on("mouseleave", hideTip);
+}
+function drawAnomalyChart() {
+  const c = curCity(); if (!c) return;
+  const svg = d3.select("#anChart"); svg.selectAll("*").remove();
+  const W = svg.node().clientWidth || 500, H = 200, mg = { t: 10, r: 4, b: 36, l: 42 };
+  svg.attr("viewBox", `0 0 ${W} ${H}`);
+  const data = c.anomaly.map(r => ({ r, v: r.metrics.score.anomaly ?? 0 }));
+  const x = d3.scaleBand().domain(d3.range(data.length)).range([mg.l, W - mg.r]).padding(0.28);
+  const ext = Math.max(0.1, d3.max(data, d => Math.abs(d.v)));
+  const y = d3.scaleLinear().domain([-ext, ext]).nice(4).range([H - mg.b, mg.t]);
+  svg.append("g").selectAll("line").data(y.ticks(4)).join("line").attr("x1", mg.l).attr("x2", W - mg.r).attr("y1", y).attr("y2", y)
+    .attr("stroke", d => d === 0 ? tok("--ink-3") : tok("--rule")).attr("stroke-width", d => d === 0 ? 1 : .8);
+  svg.append("g").selectAll("text").data(y.ticks(4)).join("text").attr("x", mg.l - 6).attr("y", d => y(d) + 3.5).attr("text-anchor", "end").text(d => sgn(d, 2));
+  const sel = c.anomaly.indexOf(curRow());
+  svg.append("g").selectAll("path").data(data).join("path")
+    .attr("d", (d, i) => { const x0 = x(i), w = x.bandwidth(), y0 = y(0), y1 = y(d.v), r = Math.min(3, Math.abs(y1 - y0), w / 2);
+      if (Math.abs(y1 - y0) < 1.5) return `M${x0},${y0 - .75}h${w}v1.5h${-w}Z`;
+      return d.v >= 0 ? `M${x0},${y0}V${y1 + r}Q${x0},${y1} ${x0 + r},${y1}H${x0 + w - r}Q${x0 + w},${y1} ${x0 + w},${y1 + r}V${y0}Z`
+                      : `M${x0},${y0}V${y1 - r}Q${x0},${y1} ${x0 + r},${y1}H${x0 + w - r}Q${x0 + w},${y1} ${x0 + w},${y1 - r}V${y0}Z`; })
+    .attr("fill", d => d.v >= 0 ? tok("--better") : tok("--worse")).attr("fill-opacity", (d, i) => i === sel ? 1 : .5);
+  const lbl = svg.append("g").selectAll("text").data(data).join("text").attr("x", (d, i) => x(i) + x.bandwidth() / 2).attr("y", H - 22).attr("text-anchor", "middle")
+    .style("fill", (d, i) => i === sel ? tok("--ink") : null).style("font-weight", (d, i) => i === sel ? 600 : null)
+    .text((d, i) => (W < 480 && i % 2 && i !== sel) ? "" : MON[d.r.month - 1].slice(0, W < 560 ? 1 : 3));
+  svg.append("g").selectAll("text").data(data.filter((d, i) => i === 0 || d.r.month === 1)).join("text")
+    .attr("x", d => x(data.indexOf(d)) + x.bandwidth() / 2).attr("y", H - 8).attr("text-anchor", "middle").text(d => d.r.year);
+  svg.append("g").selectAll("rect").data(data).join("rect").attr("x", (d, i) => x(i) - x.step() * x.paddingInner() / 2).attr("width", x.step())
+    .attr("y", mg.t).attr("height", H - mg.t - mg.b).attr("fill", "transparent").style("cursor", "pointer")
+    .on("mousemove", (e, d) => { const s = d.r.metrics.score, g = d.r.metrics.good_days;
+      showTip(e, `<b>${MONTHS[d.r.month - 1]} ${d.r.year}</b>${d.r.partial ? ` <span class="k">days 1–${d.r.through_day}</span>` : ""}
+        <div class="row" style="margin-top:6px"><span class="k">Day score</span><span class="num">${fmt(s.value, 2)} vs ${fmt(s.base_mean, 2)}</span></div>
+        <div class="row"><span class="k">Ride days</span><span class="num">${fmt(g.value, 1)} vs ${fmt(g.base_mean, 1)}</span></div>
+        <div class="row"><span class="k">Temperature</span><span class="num">${sgn(d.r.metrics.t_mean.anomaly)} °C</span></div>
+        <div class="row"><span class="k">Rain</span><span class="num">${sgn(d.r.metrics.rain_mm.anomaly, 0)} mm</span></div>`); })
+    .on("mouseleave", hideTip)
+    .on("click", (e, d) => { document.getElementById("rMonth").value = c.anomaly.length - 1 - c.anomaly.indexOf(d.r); renderReport(); });
+}
+function whyLost(d) {
+  if (d.score == null || d.score > 0) return "";
+  if (d.wind_max > CITIES.rules.wind_zero) return "W";
+  if (d.rain_ride >= CITIES.rules.rain_max_mm && !d.wet_warm) return "R";
+  if (d.score_wx > 0) return "A";
+  if (d.humid) return "H";
+  return "T";
+}
+function drawCalendar(c) {
+  const box = d3.select("#cal"); box.selectAll("*").remove();
+  ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"].forEach(w => box.append("div").attr("class", "wd").text(w));
+  const reasons = d => ({ W: `wind reached ${d.wind_max} km/h`, R: `${fmt(d.rain_ride)} mm of rain while riding`, A: `poor air quality (index ${d.aqi})`, H: `too hot and humid (humidex up to ${fmt(d.hx)})`, T: "too few hours in a usable temperature band" });
+  let month = null;
+  c.daily.slice(-35).forEach(d => {
+    const dt = new Date(d.date + "T12:00:00"), mo = dt.getMonth(), wd = (dt.getDay() + 6) % 7;
+    if (mo !== month) {
+      box.append("div").attr("class", "mlabel").text(`${MONTHS[mo]} ${dt.getFullYear()}`);
+      for (let k = 0; k < wd; k++) box.append("div");
+      month = mo;
+    }
+    const pre = (new Date(c.data_through + "T12:00:00") - dt) / 864e5 < 5, w = whyLost(d);
+    box.append("div").attr("class", "d" + (pre ? " pre" : ""))
+      .style("background", col(d.score)).style("color", inkOn(d.score ?? 0))
+      .html(`<span>${dt.getDate()}</span><span class="why">${w}</span>`)
+      .on("mousemove", e => {
+        const tier = TIERS.find(([v]) => (d.score ?? 0) >= v - 1e-9)[1];
+        showTip(e, `<b>${dt.toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long" })}</b> <span class="k">${tier}</span>
+          <div class="row" style="margin-top:6px"><span class="k">Riding hours: ideal / medium / low</span><span class="num">${d.ideal_h} / ${d.ok_h} / ${d.low_h ?? 0}</span></div>
+          <div class="row"><span class="k">High</span><span class="num">${fmt(d.t_max)} °C</span></div>
+          <div class="row"><span class="k">Rain, all day (riding hours)</span><span class="num">${fmt(d.rain)} mm (${fmt(d.rain_ride)})</span></div>
+          ${d.hx != null ? `<div class="row"><span class="k">Peak humidex</span><span class="num">${fmt(d.hx)}</span></div>` : ""}
+          <div class="row"><span class="k">Peak wind</span><span class="num">${d.wind_max} km/h</span></div>
+          <div class="row"><span class="k">Air quality index</span><span class="num">${d.aqi ?? "–"}</span></div>
+          ${d.wet_warm ? `<div style="margin-top:4px">Warm with showers: ${d.warm_dry_h} dry hours above ${CITIES.rules.wet_warm_t} °C.</div>` : ""}
+          ${w ? `<div style="margin-top:4px">Ruled out: ${reasons(d)[w]}.</div>` : ""}${pre ? `<div class="k" style="margin-top:4px">Preliminary data</div>` : ""}`);
+      }).on("mouseleave", hideTip);
+  });
+  document.getElementById("calKey").innerHTML = TIERS.map(([v, l]) => `<span><i class="swatch" style="background:${col(v)}"></i>${l}</span>`).join("");
+}
+
+function buildRules() {
+  const r = CITIES.rules, sw = v => `<i class="swatch" style="background:${col(v)}"></i>`;
+  const items = [
+    ["Riding hours", `06:00–22:00 local time, counting only hours when the sun is up.`],
+    [`${sw(1)}Ideal hour`, `${r.ideal_t[0]}–${r.ideal_t[1]} °C, wind up to ${r.wind_not_ideal} km/h${r.humidex ? `, humidex up to ${r.humidex[0]}` : ""}.`],
+    [`${sw(.5)}Medium hour`, `${r.ok_t[0][0]}–${r.ok_t[0][1]} °C or ${r.ok_t[1][0]}–${r.ok_t[1][1]} °C with wind up to ${r.wind_not_ideal} km/h, or an ideal temperature with wind of ${r.wind_not_ideal}–${r.wind_zero} km/h.`],
+    [`${sw(.25)}Low hour`, `${r.low_t[0]}–${r.low_t[1]} °C with wind up to ${r.wind_zero} km/h, or a medium temperature with wind of ${r.wind_not_ideal}–${r.wind_zero} km/h.`],
+    ...(r.humidex ? [["Heat and humidity", `The humidex (felt temperature from air temperature and dew point) caps an hour: ${r.humidex[0]}–${r.humidex[1]} makes it at best medium, ${r.humidex[1]}–${r.humidex[2]} at best low, and above ${r.humidex[2]} unusable.`]] : []),
+    ["Dry day", `Under ${r.rain_max_mm} mm of rain while riding. Scores 1 with ${r.min_hours} or more ideal hours, 0.5 with ${r.min_hours} or more ideal or medium hours, and 0.25 with ${r.min_hours} or more hours of any usable kind.`],
+    ["Showery day", `${r.rain_max_mm}–${r.wet_warm_rain_max} mm of rain while riding. Scores 0.25 if at least ${r.wet_warm_hours} riding hours are dry and above ${r.wet_warm_t} °C${r.humidex ? ` with a humidex of ${r.humidex[2]} or less` : ""}, otherwise 0.`],
+    ["Ruled out", `More than ${r.wet_warm_rain_max} mm of rain while riding, any riding hour with wind above ${r.wind_zero} km/h (hourly mean at 10 m), or a daytime European AQI of ${r.aqi_veto} or more.`],
+    ["Month", `The average day score. Ride days are the sum of day scores, so 0.6 is about 18 ride days in 30. Where air quality data is missing, the month's usual share of poor-air days is taken off.`],
+    ...(CITIES.projection ? [["Next 10 years", `Each observed hour of ${CITIES.baseline[0]}–${CITIES.baseline[1]} is shifted by the change from that decade to ${CITIES.projection.years[0]}–${CITIES.projection.years[1]} in the mean of ${CITIES.projection.models.length} CMIP6 models (${CITIES.projection.scenario}), per calendar month and place. Each model’s local change per degree of global warming is regressed over its ${CITIES.projection.fit_years[0]}–${CITIES.projection.fit_years[1]} run and scaled by that model’s global warming between the two decades. Temperature is shifted, dew point keeps the hour’s relative humidity, rain is scaled; wind and air quality are unchanged.`]] : []),
+  ];
+  document.getElementById("rules").innerHTML = items.map(([a, b]) => `<li><span class="tag">${a}</span><span>${b}</span></li>`).join("");
+}
+</script>
+</body>
+</html>
