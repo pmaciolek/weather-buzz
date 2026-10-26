@@ -136,7 +136,7 @@ def _ts_point(client, lat, lon):
     np.savez_compressed(DIR / f"{lat:.3f}_{lon:.3f}.npz", t=t.astype(np.int64).astype(np.int32), d=_i16(d, 10), src="ts")
 
 
-def fetch_ts(workers=6):
+def fetch_ts(workers=5):
     """Per-point alternative to fetch(), used when the gridded ERA5 queue is blocked."""
     import cdsapi
     pts = [tuple(p) for p in points()[:-len(C.CITIES)]]   # places get dew point from Open-Meteo
@@ -154,8 +154,8 @@ def fetch_ts(workers=6):
                 break
             except Exception as e:
                 msg = " ".join(str(e).split())
-                if "temporarily limited" in msg:
-                    time.sleep(45)
+                if "temporarily limited" in msg or "Maximum number queued requests" in msg:
+                    time.sleep(45)   # queue full: wait for a slot, not a failure
                     continue
                 attempt += 1
                 print(f"  {p}: {type(e).__name__}: {msg[:300]}", flush=True)
